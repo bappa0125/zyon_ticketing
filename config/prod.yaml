@@ -1,0 +1,36 @@
+# Production configuration
+# Loaded when APP_ENV=prod
+# Values overridden by environment variables in AWS
+
+app:
+  name: zyon-chatbot
+  env: prod
+  debug: false
+
+server:
+  host: 0.0.0.0
+  port: 8000
+
+# Production URLs come from env vars: MONGODB_URL, REDIS_URL, QDRANT_URL
+mongodb:
+  url: ${MONGODB_URL}
+  database: chat
+  conversations_collection: conversations
+  messages_collection: messages
+
+redis:
+  url: ${REDIS_URL}
+
+qdrant:
+  url: ${QDRANT_URL}
+  collection: chat_embeddings
+  vector_size: 384
+
+openrouter:
+  base_url: https://openrouter.ai/api/v1
+  model: ${OPENROUTER_MODEL:-openai/gpt-3.5-turbo}
+  embedding_model: sentence-transformers/all-MiniLM-L6-v2
+
+embedding:
+  model: sentence-transformers/all-MiniLM-L6-v2
+  dimension: 384

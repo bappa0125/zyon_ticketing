@@ -1,5 +1,17 @@
 node_modules/
 .env
 .env.local
+.env*.local
 *.log
 .DS_Store
+__pycache__/
+*.pyc
+.venv/
+venv/
+.terraform/
+*.tfstate*
+.terraform.lock.hcl
+*.tfvars
+!*.tfvars.example
+next/
+dist/

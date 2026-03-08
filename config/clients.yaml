@@ -1,0 +1,10 @@
+# Client monitoring configuration
+# Add new clients without code changes
+
+clients:
+  - name: Sahi
+    domain: sahi.com
+    competitors:
+      - Zerodha
+      - Upstox
+      - Groww

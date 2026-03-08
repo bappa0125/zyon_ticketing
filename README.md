@@ -80,11 +80,23 @@ A ChatGPT-style AI chatbot with streaming responses, vector memory (Qdrant), con
 - `config/dev.yaml` — Local development
 - `OPENROUTER_API_KEY` — Required for LLM
 
+## Development Rules
+
+Before implementing a feature:
+
+1. **Review** [docs/FEATURE_REGISTRY.md](docs/FEATURE_REGISTRY.md) — know what exists and which files own it.
+2. **Follow** [docs/SYSTEM_GUARDRAILS.md](docs/SYSTEM_GUARDRAILS.md) — architecture and performance constraints.
+3. **Respect** [docs/CODE_OWNERSHIP_MAP.md](docs/CODE_OWNERSHIP_MAP.md) — add code in the right modules.
+
+Do not refactor working modules. Only add new files. Document every new feature in FEATURE_REGISTRY.md.
+
 ## Project Structure
 
 ```
-├── config/     # dev.yaml, prod.yaml
+├── config/     # dev.yaml, prod.yaml, clients.yaml
 ├── docker/     # nginx.conf
+├── docs/       # Architecture, governance (FEATURE_REGISTRY, GUARDRAILS, etc.)
+├── .cursor/    # system_prompt.md — Cursor instructions
 ├── frontend/   # Next.js
 ├── backend/    # FastAPI
 └── .github/    # CI (lint, test, build)

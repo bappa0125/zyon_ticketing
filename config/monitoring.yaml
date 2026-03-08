@@ -1,0 +1,27 @@
+# Social data guardrails — protects MongoDB and reduces scraping costs
+# Loaded with dev.yaml / prod.yaml
+
+monitoring:
+  social_sources:
+    twitter: true
+    youtube: true
+  apify:
+    twitter_actor: apify/twitter-search-scraper
+    youtube_actor: apify/youtube-comment-scraper
+    max_items_per_run: 20
+  social_data:
+    retention_days: 30
+    max_posts_per_entity_per_day: 100
+    engagement_thresholds:
+      likes: 2
+      retweets: 1
+      comments: 1
+    deduplication:
+      enabled: true
+      hash_algorithm: md5
+
+  ingestion:
+    batch_size: 20
+
+  crawling:
+    interval_minutes: 30

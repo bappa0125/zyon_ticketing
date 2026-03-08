@@ -156,3 +156,49 @@ Detect topics where competitors have media coverage but the client does not. Sur
 
 **Description:**  
 MongoDB aggregation over media_articles by entity + topic. Returns topics where competitor_mentions > 0 and client_mentions == 0. Top 20 opportunities.
+
+---
+
+## Feature 6.5 — Social Data Guardrails
+
+**Status:** Implemented
+
+**Purpose:**  
+Prepare the system for safe high-volume social media ingestion. Config-driven deduplication, engagement filtering, daily sampling limits, TTL retention, and Apify query optimization rules.
+
+**Files involved:**
+
+- `config/monitoring.yaml`
+- `backend/app/core/hash_utils.py`
+- `backend/app/core/social_posts_indexes.py`
+- `backend/app/services/social_filter_service.py`
+- `docs/architecture/social_data_guardrails.md`
+
+**Description:**  
+Config loader extended to load monitoring.yaml. Hash dedup (MD5), engagement filter, TTL index on social_posts, indexes on content_hash/entity. Apify single-query rule and storage schema documented.
+
+---
+
+## Feature 7 — Social Monitoring (Apify)
+
+**Status:** Implemented
+
+**Purpose:**  
+Collect social media mentions (Twitter, YouTube) using Apify. Combined OR query, entity detection in backend. Respects Feature 6.5 guardrails.
+
+**Files involved:**
+
+- `backend/app/services/apify_service.py`
+- `backend/app/services/social_monitor_service.py`
+- `backend/app/services/social_monitor_worker.py`
+- `backend/app/api/social_api.py`
+- `frontend/src/app/social/page.tsx`
+- `frontend/src/components/SocialTable.tsx`
+- `docs/features/social_monitoring_apify.md`
+
+**API:**
+
+- `GET /api/social/latest?entity=Sahi`
+
+**Description:**  
+Apify integration. Load entities from clients.yaml; single combined query per platform; normalize and apply guardrails (engagement filter, dedup, daily limit); store in social_posts. APIFY_API_KEY in .env.

@@ -55,6 +55,12 @@ export default function RootLayout({
           >
             Opportunities
           </Link>
+          <Link
+            href="/social"
+            className="text-sm text-zinc-400 hover:text-zinc-200"
+          >
+            Social
+          </Link>
         </nav>
         {children}
       </body>

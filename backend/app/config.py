@@ -8,13 +8,27 @@ from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
-def load_yaml(env: str) -> dict[str, Any]:
-    # Try project_root/config (local) then /app/config (Docker)
+def _get_config_dir() -> Path:
     project_root = Path(__file__).resolve().parent.parent.parent
     config_dir = project_root / "config"
     if not config_dir.exists():
         config_dir = Path("/app/config")
+    return config_dir
+
+
+def load_yaml(env: str) -> dict[str, Any]:
+    config_dir = _get_config_dir()
     path = config_dir / f"{env}.yaml"
+    if path.exists():
+        with open(path) as f:
+            return yaml.safe_load(f) or {}
+    return {}
+
+
+def load_monitoring_yaml() -> dict[str, Any]:
+    """Load config/monitoring.yaml. Used for social data guardrails."""
+    config_dir = _get_config_dir()
+    path = config_dir / "monitoring.yaml"
     if path.exists():
         with open(path) as f:
             return yaml.safe_load(f) or {}
@@ -31,6 +45,7 @@ class Settings(BaseSettings):
     tavily_api_key: str = Field(default="", alias="TAVILY_API_KEY")
     hf_token: str = Field(default="", alias="HF_TOKEN")
     mock_llm: bool = Field(default=False, alias="MOCK_LLM")
+    apify_api_key: str = Field(default="", alias="APIFY_API_KEY")
 
     class Config:
         env_file = ".env"
@@ -55,5 +70,6 @@ def get_config() -> dict[str, Any]:
         "media_index": base.get("media_index", {}),
         "media_ingestion": base.get("media_ingestion", {}),
         "media_mention": base.get("media_mention", {}),
+        "monitoring": load_monitoring_yaml().get("monitoring", {}),
         "settings": settings,
     }

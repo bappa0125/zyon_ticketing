@@ -1,5 +1,6 @@
 # Client monitoring configuration
 # Add new clients without code changes
+# aliases: optional list for entity detection (Feature 7.0)
 
 clients:
   - name: Sahi
@@ -8,3 +9,9 @@ clients:
       - Zerodha
       - Upstox
       - Groww
+    aliases:
+      - sahi trading
+      - sahi trading app
+      - sahi derivatives
+      - sahi platform
+      - sahi brokerage

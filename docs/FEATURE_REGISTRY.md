@@ -202,3 +202,59 @@ Collect social media mentions (Twitter, YouTube) using Apify. Combined OR query,
 
 **Description:**  
 Apify integration. Load entities from clients.yaml; single combined query per platform; normalize and apply guardrails (engagement filter, dedup, daily limit); store in social_posts. APIFY_API_KEY in .env.
+
+---
+
+## Feature 7.0 — Entity Alias Detection
+
+**Status:** Implemented
+
+**Purpose:**  
+Improve entity detection accuracy, avoid Hindi false positives (e.g. "sahi hai").
+
+**Files involved:**
+
+- `backend/app/services/entity_detection_service.py`
+- `config/clients.yaml` (aliases), `config/monitoring.yaml` (entity_detection)
+- `docs/features/entity_alias_detection.md`
+
+**Description:**  
+Load aliases from clients.yaml and monitoring.entity_detection; ignore_patterns for conversational Hindi; detect_entity(text) returns canonical entity or None.
+
+---
+
+## Feature 7.1 — Reddit Monitoring (Apify)
+
+**Status:** Implemented
+
+**Purpose:**  
+Collect Reddit mentions via Apify actor apify/reddit-scraper.
+
+**Files involved:**
+
+- `backend/app/services/reddit_service.py`
+- `backend/app/services/reddit_worker.py`
+- `config/monitoring.yaml` (reddit section)
+- `docs/features/reddit_monitoring.md`
+
+**Description:**  
+Build combined OR query; call Apify reddit-scraper; entity_detection; guardrails pipeline; store in social_posts. APIFY_API_KEY.
+
+---
+
+## Feature 7.3 — YouTube Monitoring (Apify)
+
+**Status:** Implemented
+
+**Purpose:**  
+Collect YouTube mentions via Apify actor apify/youtube-scraper.
+
+**Files involved:**
+
+- `backend/app/services/youtube_service.py`
+- `backend/app/services/youtube_worker.py`
+- `config/monitoring.yaml` (youtube section)
+- `docs/features/youtube_monitoring.md`
+
+**Description:**  
+Build combined OR query; call Apify youtube-scraper; entity_detection; guardrails pipeline; store in social_posts. APIFY_API_KEY.

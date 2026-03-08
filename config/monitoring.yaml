@@ -2,6 +2,28 @@
 # Loaded with dev.yaml / prod.yaml
 
 monitoring:
+  entity_detection:
+    ignore_patterns:
+      - sahi hai
+      - bilkul sahi
+      - sahi bola
+    entity_aliases:
+      Zerodha:
+        - zerodha
+        - zerodha kite
+        - kite app
+      Upstox:
+        - upstox
+      Groww:
+        - groww
+  reddit:
+    enabled: true
+    actor: "trudax/reddit-scraper"
+    max_items_per_run: 20
+  youtube:
+    enabled: true
+    actor: "streamers/youtube-scraper"
+    max_items_per_run: 10
   social_sources:
     twitter: true
     youtube: true

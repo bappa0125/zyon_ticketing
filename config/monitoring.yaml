@@ -16,6 +16,7 @@ monitoring:
         - upstox
       Groww:
         - groww
+        - grow app
   reddit:
     enabled: true
     actor: "trudax/reddit-scraper"

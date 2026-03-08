@@ -1,5 +1,6 @@
 """
-Media mention search - combines internal index, Google News RSS, DuckDuckGo/Tavily.
+Media mention search - combines all monitoring sources via mention_retrieval_service,
+plus live article discovery (Google News RSS, Tavily/DuckDuckGo) when fewer than 10.
 Deduplicates, validates, quality scores, optionally reranks.
 """
 import re
@@ -20,6 +21,7 @@ logger = get_logger(__name__)
 
 MAX_CANDIDATES = 10
 MAX_VALIDATED = 5
+MIN_MENTIONS = 10
 MAX_CONCURRENT = 2
 TIMEOUT = 5
 VALIDATION_CHARS = 1500
@@ -266,6 +268,44 @@ def _llm_rerank(articles: list[dict], company: str) -> list[dict]:
     return articles
 
 
+def _fetch_more_articles(company: str) -> list[dict]:
+    """Fetch more articles via media_monitor_service (Google News + DuckDuckGo)."""
+    try:
+        from app.services.media_monitor_service import search_entity
+        items = search_entity(company, company, sources=["google_news", "duckduckgo"])
+        out = []
+        for r in items:
+            out.append({
+                "title": r.get("title", ""),
+                "link": r.get("url", ""),
+                "url": r.get("url", ""),
+                "source": r.get("source", "") or urlparse(r.get("url", "")).netloc,
+                "snippet": r.get("snippet", ""),
+                "publish_date": _format_date(r.get("timestamp")),
+                "type": "article",
+            })
+        return out
+    except Exception as e:
+        logger.warning("mention_article_discovery_failed", company=company, error=str(e))
+        return []
+
+
+def _retrieval_to_mention(r: dict) -> dict:
+    """Convert mention_retrieval output to search_mentions output format."""
+    url = r.get("url", "")
+    return {
+        "title": r.get("title", ""),
+        "link": url,
+        "url": url,
+        "source": r.get("source", ""),
+        "summary": r.get("summary", ""),
+        "snippet": (r.get("summary") or "")[:200],
+        "timestamp": r.get("timestamp", ""),
+        "publish_date": r.get("timestamp", ""),
+        "type": r.get("type", "article"),
+    }
+
+
 def search_mentions(
     company: str,
     use_internal: bool = True,
@@ -274,68 +314,107 @@ def search_mentions(
     llm_rerank: bool = True,
 ) -> list[dict]:
     """
-    Combined search: internal index + Google News RSS + Tavily/DuckDuckGo.
-    Deduplicate, validate, score, select top 5, optional LLM rerank.
-    Returns: [{title, link, source, score}, ...]
+    Retrieve mentions from all monitoring sources (media_articles, social_posts) via
+    mention_retrieval_service. If fewer than MIN_MENTIONS, trigger article discovery
+    (Google News + DuckDuckGo). Returns unified list: title, source, summary, url,
+    timestamp, type (article|reddit|youtube|twitter).
     """
-    all_results = []
-    if use_internal:
-        try:
-            from app.services.media_index.article_search import search as media_search
-            internal = media_search(f'"{company}" news OR articles OR mentions', limit=10, use_cache=False)
-            for r in internal:
-                all_results.append({
-                    "title": r.get("title", ""),
-                    "link": r.get("link", r.get("url", "")),
-                    "source": r.get("source", ""),
-                    "snippet": r.get("snippet", ""),
-                    "url": r.get("link", r.get("url", "")),
-                    "publish_date": r.get("publish_date"),
-                })
-        except Exception as e:
-            logger.warning("mention_internal_failed", company=company, error=str(e))
+    all_results: list[dict] = []
+    seen_urls: set[str] = set()
 
-    if use_google_news:
-        for r in _search_google_news_rss(company, max_results=3):
-            all_results.append({
-                "title": r.get("title", ""),
-                "link": r.get("link", ""),
-                "source": r.get("source", "") or urlparse(r.get("link", "")).netloc,
-                "snippet": r.get("snippet", ""),
-                "url": r.get("link", ""),
-                "publish_date": r.get("publish_date"),
-            })
+    # 1. Retrieve from MongoDB (media_articles, social_posts)
+    try:
+        from app.services.mention_retrieval_service import retrieve_mentions
+        retrieval = retrieve_mentions(company, min_count=MIN_MENTIONS)
+        for r in retrieval:
+            m = _retrieval_to_mention(r)
+            url = (m.get("url") or m.get("link", "")).strip().lower()
+            if url and url not in seen_urls:
+                seen_urls.add(url)
+                all_results.append(m)
+    except Exception as e:
+        logger.warning("mention_retrieval_failed", company=company, error=str(e))
 
-    if use_external:
-        try:
-            from app.services.url_discovery.url_search_service import search as external_search
-            ext = external_search(f'"{company}" news OR articles OR blog', max_results=10)
-            for r in ext:
-                link = r.get("link", r.get("url", ""))
+    # 2. If fewer than MIN_MENTIONS, trigger article discovery
+    if len(all_results) < MIN_MENTIONS and use_internal:
+        for r in _fetch_more_articles(company):
+            url = (r.get("url") or r.get("link", "")).strip().lower()
+            if url and url not in seen_urls:
+                seen_urls.add(url)
+                all_results.append(r)
+
+    # 3. Supplement with Google News RSS and external (Tavily/DuckDuckGo) if still short
+    if len(all_results) < MIN_MENTIONS and use_google_news:
+        for r in _search_google_news_rss(company, max_results=5):
+            link = r.get("link", "")
+            url = link.strip().lower() if link else ""
+            if url and url not in seen_urls:
+                seen_urls.add(url)
                 all_results.append({
                     "title": r.get("title", ""),
                     "link": link,
-                    "source": r.get("source", "") or (urlparse(link).netloc if link else ""),
-                    "snippet": r.get("snippet", ""),
                     "url": link,
+                    "source": r.get("source", "") or urlparse(link).netloc,
+                    "snippet": r.get("snippet", ""),
+                    "publish_date": r.get("publish_date", ""),
+                    "type": "article",
                 })
+
+    if len(all_results) < MIN_MENTIONS and use_external:
+        try:
+            from app.services.url_discovery.url_search_service import search as external_search
+            for r in external_search(f'"{company}" news OR articles OR blog', max_results=10):
+                link = r.get("link", r.get("url", ""))
+                url = link.strip().lower() if link else ""
+                if url and url not in seen_urls:
+                    seen_urls.add(url)
+                    all_results.append({
+                        "title": r.get("title", ""),
+                        "link": link,
+                        "url": link,
+                        "source": r.get("source", "") or (urlparse(link).netloc if link else ""),
+                        "snippet": r.get("snippet", ""),
+                        "type": "article",
+                    })
         except Exception as e:
             logger.warning("mention_external_failed", company=company, error=str(e))
 
-    deduped = _deduplicate(all_results)
-    validated = _validate_and_score(deduped, company, max_validate=MAX_VALIDATED)
-    validated.sort(key=lambda x: x.get("score", 0), reverse=True)
-    top5 = validated[:TOP_RESULTS]
-    # Fallback: if validation discarded all, use raw results so user gets something
-    if not top5 and deduped:
-        for r in deduped[:TOP_RESULTS]:
-            r = dict(r)
-            r["score"] = r.get("score", 50)
-            top5.append(r)
-        logger.info("mention_unvalidated_fallback", company=company, count=len(top5))
+    # 4. Split: social (from DB) vs articles (may need validation)
+    social = [r for r in all_results if r.get("type") != "article"]
+    articles = [r for r in all_results if r.get("type") == "article"]
 
-    if llm_rerank and len(top5) > 1:
-        top5 = _llm_rerank(top5, company)
+    # 5. Validate and score article-type items
+    if articles:
+        validated = _validate_and_score(articles, company, max_validate=MAX_VALIDATED)
+        validated_urls = {_url_normalize(r.get("link") or r.get("url", "")) for r in validated}
+        if len(validated) + len(social) < MIN_MENTIONS:
+            for r in _deduplicate(articles):
+                if len(validated) + len(social) >= MIN_MENTIONS:
+                    break
+                u = _url_normalize(r.get("link") or r.get("url", ""))
+                if u and u not in validated_urls:
+                    r = dict(r)
+                    r["score"] = r.get("score", 50)
+                    validated.append(r)
+                    validated_urls.add(u)
+        articles = validated
+
+    combined = social + articles
+
+    # 6. Sort: social first, then articles by score desc
+    def sort_key(x):
+        if x.get("type") != "article":
+            return (0, 0)
+        return (1, -x.get("score", 0))
+
+    combined.sort(key=sort_key)
+    top = combined[:max(MIN_MENTIONS, TOP_RESULTS)]
+
+    if llm_rerank and len([r for r in top if r.get("type") == "article"]) > 1:
+        art = [r for r in top if r.get("type") == "article"]
+        soc = [r for r in top if r.get("type") != "article"]
+        reranked = _llm_rerank(art, company)
+        top = soc + reranked[:TOP_RESULTS]
 
     return [
         {
@@ -343,8 +422,9 @@ def search_mentions(
             "link": r.get("link", r.get("url", "")),
             "source": r.get("source", ""),
             "score": r.get("score", 0),
-            "publish_date": _format_date(r.get("publish_date")),
-            "snippet": (r.get("snippet", "") or (r.get("content_preview", "") or ""))[:200],
+            "publish_date": _format_date(r.get("publish_date") or r.get("timestamp")),
+            "snippet": (r.get("snippet", "") or r.get("summary", "") or "")[:200],
+            "type": r.get("type", "article"),
         }
-        for r in top5
+        for r in top
     ]

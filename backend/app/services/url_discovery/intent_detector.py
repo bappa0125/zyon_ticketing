@@ -60,13 +60,58 @@ def is_article_search_intent_embedding(message: str) -> Tuple[bool, float]:
         return (True, 0.6)  # On error, assume search for substantive messages
 
 
+# Greetings and casual phrases - do NOT trigger article search
+GREETING_PATTERNS = [
+    r"^\s*(hi|hello|hey|hola|yo)\s*[!.,]?\s*$",
+    r"^\s*(hi|hello|hey)\s+(how\s+are\s+you|how\s+r\s+u|how\s+do\s+you\s+do)\s*[!.,]?\s*$",
+    r"^\s*how\s+are\s+you\s*[!.,]?\s*$",
+    r"^\s*what'?s?\s+up\s*[!.,]?\s*$",
+    r"^\s*how'?s?\s+it\s+going\s*[!.,]?\s*$",
+    r"^\s*how\s+are\s+things\s*[!.,]?\s*$",
+    r"^\s*good\s+(morning|afternoon|evening)\s*[!.,]?\s*$",
+    r"^\s*(hey\s+)?there\s*[!.,]?\s*$",
+    r"^\s*supp?\s*[!.,]?\s*$",
+]
+
+GREETING_PHRASES = {
+    "hi", "hello", "hey", "hola", "yo", "howdy",
+    "hi how are you", "hello how are you", "hey how are you",
+    "how are you", "how r u", "how do you do", "how r u doing",
+    "whats up", "what's up", "whats good",
+    "hows it going", "how's it going", "how are things",
+    "good morning", "good afternoon", "good evening",
+    "hi there", "hello there", "hey there",
+}
+
+
+def is_greeting_or_casual(message: str) -> bool:
+    """True if message is a greeting or casual small talk - do NOT run article search."""
+    msg = message.strip().lower()
+    if len(msg) < 3:
+        return True
+    if msg in GREETING_PHRASES:
+        return True
+    norm = re.sub(r"[!.,?]+", "", msg)
+    if norm in GREETING_PHRASES:
+        return True
+    if any(re.match(pat, msg, re.I) for pat in GREETING_PATTERNS):
+        return True
+    # Short messages that are mostly greetings
+    words = set(w.strip(".,!?") for w in msg.split())
+    if words <= {"hi", "hello", "hey", "how", "are", "you", "doing", "fine", "good"}:
+        return True
+    return False
+
+
 def extract_search_query(message: str) -> str | None:
     """
     Extract search query for live search. Always returns something for substantive messages.
-    Used when we always run live search first - need a query.
+    Do NOT return a query for greetings or casual phrases.
     """
     msg = message.strip()
     if len(msg) < 10:
+        return None
+    if is_greeting_or_casual(msg):
         return None
     # 1. Use regex entity extraction when patterns match
     entity = extract_company_or_topic(msg)
@@ -100,23 +145,35 @@ TRIGGER_WORDS = {"mention", "mentions", "mentioned", "article", "articles", "new
 
 
 def extract_company_or_topic(message: str) -> str | None:
-    """Extract company/topic from message. Returns None if not a URL discovery request."""
+    """Extract company/topic from message. Resolves aliases (e.g. 'grow app' -> Groww)."""
     msg_lower = message.strip().lower()
+    raw_entity: str | None = None
     # Pattern-based
     for pat in TRIGGER_PATTERNS:
         if re.search(pat, msg_lower, re.I):
-            entity = _extract_entity(message)
-            if entity:
-                return entity
-    # Domain present (Sahi.com) + any trigger word
-    if re.search(r"\b[a-zA-Z0-9][-a-zA-Z0-9]*\.(?:com|io|ai|co|org|net|in)\b", message):
-        if any(w in msg_lower for w in TRIGGER_WORDS):
-            return _extract_entity(message)
-    # Domain only + "find|search|recent|mention|article|news" anywhere
-    domain_match = re.search(r"\b([a-zA-Z0-9][-a-zA-Z0-9]*\.(?:com|io|ai|co|org|net|in))\b", message)
-    if domain_match and re.search(r"\b(find|search|recent|mention|article|news|website|coverage)\b", msg_lower):
-        return domain_match.group(1)
-    return None
+            raw_entity = _extract_entity(message)
+            break
+    if raw_entity is None:
+        # Domain present (Sahi.com) + any trigger word
+        if re.search(r"\b[a-zA-Z0-9][-a-zA-Z0-9]*\.(?:com|io|ai|co|org|net|in)\b", message):
+            if any(w in msg_lower for w in TRIGGER_WORDS):
+                raw_entity = _extract_entity(message)
+    if raw_entity is None:
+        # Domain only + "find|search|recent|mention|article|news" anywhere
+        domain_match = re.search(r"\b([a-zA-Z0-9][-a-zA-Z0-9]*\.(?:com|io|ai|co|org|net|in))\b", message)
+        if domain_match and re.search(r"\b(find|search|recent|mention|article|news|website|coverage)\b", msg_lower):
+            return domain_match.group(1)
+    if not raw_entity:
+        return None
+    # Resolve via known entities (e.g. "grow app" -> Groww)
+    try:
+        from app.services.entity_detection_service import detect_entity
+        canonical = detect_entity(message)
+        if canonical:
+            return canonical
+    except Exception:
+        pass
+    return raw_entity
 
 
 FOLLOW_UP_PATTERNS = [
@@ -146,6 +203,41 @@ RECALL_QUESTIONS_PATTERNS = [
     r"\b(my\s+)?last\s+(\d+\s+)?questions?\b",
     r"\bsummarize\s+(my\s+)?(questions?|messages?)\b",
 ]
+
+
+# Suggested prompts - shown when user asks something out of scope
+SUGGESTED_PROMPTS = [
+    "Give me the latest articles about Sahi",
+    "Show me recent mentions of Zerodha",
+    "Find articles about Upstox",
+    "Latest news on Groww",
+    "Search for mentions of Sahi trading app",
+]
+
+
+def get_out_of_scope_message() -> str:
+    """Return message telling user what phrases to ask. No search, no LLM."""
+    lines = [
+        "I can only help with **articles and mentions** about monitored companies (Sahi, Zerodha, Upstox, Groww).",
+        "",
+        "**Try asking:**",
+    ]
+    for p in SUGGESTED_PROMPTS:
+        lines.append(f"- {p}")
+    lines.append("")
+    lines.append("_I don't run general web search or answer random questions._")
+    return "\n".join(lines)
+
+
+def is_in_scope_for_search(message: str) -> bool:
+    """
+    True ONLY when message clearly asks for articles/mentions about a company.
+    Random questions, greetings, general knowledge -> False. No search.
+    """
+    if is_greeting_or_casual(message):
+        return False
+    company = extract_company_or_topic(message)
+    return company is not None
 
 
 def is_recall_questions_request(message: str) -> bool:
@@ -182,6 +274,17 @@ def _extract_entity(message: str) -> str:
     )
     if about_match:
         entity = about_match.group(1).strip()
+        if len(entity) > 2 and len(entity) < 100:
+            return entity
+
+    # "latest news on X" / "news on X" / "articles on X"
+    on_match = re.search(
+        r'\b(?:latest|recent|top\s+)?(?:news|articles?|mentions?)\s+on\s+([^.?!]+?)(?:\s+and\s+|\s+with\s+|\s*$|\.)',
+        message,
+        re.I,
+    )
+    if on_match:
+        entity = on_match.group(1).strip()
         if len(entity) > 2 and len(entity) < 100:
             return entity
 

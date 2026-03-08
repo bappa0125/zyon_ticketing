@@ -205,6 +205,26 @@ Apify integration. Load entities from clients.yaml; single combined query per pl
 
 ---
 
+## Feature 7.2 — Intent Classification (Search Gate)
+
+**Status:** Implemented
+
+**Purpose:**  
+Prevent search pipelines from triggering on conversational messages (greetings, small talk, irrelevant questions). Use a hybrid rule + embedding layer to classify intent (chat vs search) before any external search.
+
+**Files involved:**
+
+- `backend/app/services/intent_classifier.py`
+- `backend/app/services/url_discovery/intent_detector.py` (reused)
+- `backend/app/services/embedding_service.py` (reused)
+- `backend/app/api/chat.py`
+- `docs/features/intent_classification.md`
+
+**Flow:**  
+User message → Intent Classifier → Chat response OR Search pipeline (RSS, DuckDuckGo, Tavily, Apify). Search only when intent=search and entity is extracted.
+
+---
+
 ## Feature 7.0 — Entity Alias Detection
 
 **Status:** Implemented

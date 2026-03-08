@@ -126,7 +126,13 @@ export default function Home() {
             {messages.length === 0 && (
               <div className="text-center text-muted py-16">
                 <h2 className="text-xl font-semibold mb-2">How can I help you today?</h2>
-                <p className="text-sm text-zinc-500">Start a conversation by typing a message below.</p>
+                <p className="text-sm text-zinc-500 mb-4">I can find articles and mentions about monitored companies. Try asking:</p>
+                <ul className="text-sm text-zinc-400 space-y-1 max-w-md mx-auto text-left list-disc list-inside">
+                  <li>Give me the latest articles about Sahi</li>
+                  <li>Show me recent mentions of Zerodha</li>
+                  <li>Find articles about Upstox</li>
+                  <li>Latest news on Groww</li>
+                </ul>
               </div>
             )}
             {messages.map((msg, i) => (

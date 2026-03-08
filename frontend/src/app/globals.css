@@ -24,3 +24,9 @@ code {
  pre code {
   @apply bg-transparent p-0;
 }
+
+/* Chat message: prevent link/content overflow, wrap long text */
+.chat-message-content a {
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}

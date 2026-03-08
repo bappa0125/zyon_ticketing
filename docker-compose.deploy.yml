@@ -1,0 +1,62 @@
+# Production deploy - uses pre-built images from GHCR
+# Set GHCR_OWNER (e.g. bappa0125) before running
+# docker compose -f docker-compose.deploy.yml pull && docker compose -f docker-compose.deploy.yml up -d
+
+services:
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - frontend
+      - backend
+    restart: always
+
+  frontend:
+    image: ghcr.io/${GHCR_OWNER}/zyon-chat-frontend:latest
+    environment:
+      - NEXT_PUBLIC_API_URL=/api
+    depends_on:
+      - backend
+    restart: always
+
+  backend:
+    image: ghcr.io/${GHCR_OWNER}/zyon-chat-backend:latest
+    ports:
+      - "8000:8000"
+    environment:
+      - APP_ENV=prod
+      - MONGODB_URL=${MONGODB_URL:-mongodb://mongodb:27017}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - QDRANT_URL=${QDRANT_URL:-http://qdrant:6333}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+    depends_on:
+      - mongodb
+      - redis
+      - qdrant
+    restart: always
+
+  mongodb:
+    image: mongo:7
+    volumes:
+      - mongodb_data:/data/db
+    restart: always
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    restart: always
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: always
+
+volumes:
+  mongodb_data:
+  redis_data:
+  qdrant_data:

@@ -31,7 +31,7 @@ A ChatGPT-style AI chatbot with streaming responses, vector memory (Qdrant), con
 
 **Data flow:** User message → MongoDB → Qdrant (context) → Prompt pipeline → OpenRouter → Stream response → MongoDB + Qdrant.
 
-> Full architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+> Full architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Deploy: [docs/DEPLOY.md](docs/DEPLOY.md)
 
 ## Quick Start (Local)
 

@@ -1,0 +1,15 @@
+# Crawler worker with Playwright - based on official Playwright Python image
+FROM mcr.microsoft.com/playwright/python:v1.41.0-jammy
+
+WORKDIR /app
+
+COPY backend/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY backend/app/ ./app/
+COPY config/ ./config/
+
+ENV PYTHONPATH=/app
+ENV APP_ENV=dev
+
+CMD ["python", "-m", "app.worker_main"]

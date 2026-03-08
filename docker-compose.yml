@@ -17,10 +17,13 @@ services:
     build:
       context: .
       dockerfile: frontend/Dockerfile
+      args:
+        - BACKEND_URL=http://backend:8000
     ports:
       - "3000:3000"
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost/api
+      - BACKEND_URL=http://backend:8000
     depends_on:
       - backend
     restart: unless-stopped
@@ -31,12 +34,51 @@ services:
       dockerfile: backend/Dockerfile
     ports:
       - "8000:8000"
+    env_file:
+      - .env
     environment:
       - APP_ENV=dev
       - MONGODB_URL=mongodb://mongodb:27017
       - REDIS_URL=redis://redis:6379/0
       - QDRANT_URL=http://qdrant:6333
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      - HF_TOKEN=${HF_TOKEN:-}
+    depends_on:
+      - mongodb
+      - redis
+      - qdrant
+    restart: unless-stopped
+
+  media_index_worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      - APP_ENV=dev
+      - MONGODB_URL=mongodb://mongodb:27017
+      - REDIS_URL=redis://redis:6379/0
+      - QDRANT_URL=http://qdrant:6333
+      - HF_TOKEN=${HF_TOKEN:-}
+    command: ["python", "scripts/media_index_scheduler.py"]
+    depends_on:
+      - mongodb
+      - redis
+      - qdrant
+    restart: unless-stopped
+
+  crawler_worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.worker
+    environment:
+      - APP_ENV=dev
+      - MONGODB_URL=mongodb://mongodb:27017
+      - REDIS_URL=redis://redis:6379/0
+      - QDRANT_URL=http://qdrant:6333
+      - HF_TOKEN=${HF_TOKEN:-}
+    volumes:
+      - crawler_snapshots:/app/data/snapshots
     depends_on:
       - mongodb
       - redis
@@ -71,3 +113,4 @@ volumes:
   mongodb_data:
   redis_data:
   qdrant_data:
+  crawler_snapshots:

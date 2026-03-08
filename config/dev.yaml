@@ -26,7 +26,9 @@ qdrant:
 
 openrouter:
   base_url: https://openrouter.ai/api/v1
-  model: openai/gpt-3.5-turbo
+  model: openrouter/free
+  # Perplexity Sonar does web search natively - no plugin needed
+  web_search_model: perplexity/sonar
   embedding_model: sentence-transformers/all-MiniLM-L6-v2
 
 embedding:
@@ -35,3 +37,62 @@ embedding:
 
 frontend:
   url: http://localhost:3000
+
+crawler:
+  frequency_minutes: 30
+  page_timeout_ms: 15000
+  user_agent: "ZyonCompetitorMonitor/1.0"
+  qdrant_page_collection: page_embeddings
+  change_similarity_threshold: 0.85
+  # Streaming + lazy architecture
+  snapshot_dir: /app/data/snapshots
+  snapshots_per_page: 20
+  # Playwright resource control
+  browser_instances: 1
+  concurrent_pages: 2
+  block_images: true
+  block_videos: true
+  block_fonts: true
+  block_tracking: true
+  # Embedding optimization
+  embedding_batch_size: 4
+  # Worker limits
+  max_simultaneous_jobs: 2
+
+llm:
+  model: openrouter/free
+  fallback_model: meta-llama/llama-3.2-3b-instruct:free
+  max_tokens: 400
+
+qdrant_optimization:
+  on_disk: true
+  payload_compression: true
+
+media_ingestion:
+  max_sources_per_cycle: 5
+  max_articles_per_cycle: 20
+  max_articles_per_source_initial: 200
+  max_concurrent_fetches: 3
+  crawl_frequency_minutes: 30
+  monitored_entities:
+    - Sahi
+    - Zerodha
+    - Upstox
+
+media_index:
+  max_articles_per_cycle: 20
+  crawl_frequency_minutes: 30
+  monitored_entities:
+    - Sahi.com
+    - Sahi trading
+  sources: []  # Loaded from config/media_sources.yaml if empty
+
+media_mention:
+  rerank_model: openai/gpt-3.5-turbo
+
+url_discovery:
+  tavily_api_key: ""  # Optional - set TAVILY_API_KEY env
+  cache_ttl_hours: 6
+  max_results: 10
+  max_validation_pages: 5
+  rate_limit_per_minute: 3

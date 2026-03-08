@@ -38,9 +38,10 @@ A ChatGPT-style AI chatbot with streaming responses, vector memory (Qdrant), con
 1. **Install Docker Desktop** (if you don't have it):
    - https://www.docker.com/products/docker-desktop/
 
-2. **Set your OpenRouter API key**
+2. **Set API keys** (optional, in `.env` or environment):
    ```bash
    export OPENROUTER_API_KEY=your_key_here
+   export HF_TOKEN=your_huggingface_token_here   # Optional: higher rate limits for embeddings
    ```
 
 3. **Start all services**

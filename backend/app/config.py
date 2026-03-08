@@ -27,7 +27,10 @@ class Settings(BaseSettings):
     redis_url: str = Field(default="redis://redis:6379/0", alias="REDIS_URL")
     qdrant_url: str = Field(default="http://qdrant:6333", alias="QDRANT_URL")
     openrouter_api_key: str = Field(default="", alias="OPENROUTER_API_KEY")
-    openrouter_model: str = Field(default="openai/gpt-3.5-turbo", alias="OPENROUTER_MODEL")
+    openrouter_model: str = Field(default="openrouter/free", alias="OPENROUTER_MODEL")
+    tavily_api_key: str = Field(default="", alias="TAVILY_API_KEY")
+    hf_token: str = Field(default="", alias="HF_TOKEN")
+    mock_llm: bool = Field(default=False, alias="MOCK_LLM")
 
     class Config:
         env_file = ".env"
@@ -45,5 +48,12 @@ def get_config() -> dict[str, Any]:
         "qdrant": base.get("qdrant", {}),
         "openrouter": base.get("openrouter", {}),
         "embedding": base.get("embedding", {}),
+        "crawler": base.get("crawler", {}),
+        "llm": base.get("llm", {}),
+        "qdrant_optimization": base.get("qdrant_optimization", {}),
+        "url_discovery": base.get("url_discovery", {}),
+        "media_index": base.get("media_index", {}),
+        "media_ingestion": base.get("media_ingestion", {}),
+        "media_mention": base.get("media_mention", {}),
         "settings": settings,
     }

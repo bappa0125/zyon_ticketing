@@ -1,0 +1,1 @@
+"""Competitor monitoring crawler service."""

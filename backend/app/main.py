@@ -4,8 +4,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
-from app.api import chat, history
+from app.api import chat, history, crawler, system_metrics, url_search, media_search, coverage
 from app.core.logging import setup_logging, get_logger
 from app.core.health import router as health_router
 from app.core.metrics import router as metrics_router
@@ -17,7 +18,12 @@ logger = get_logger(__name__)
 async def lifespan(app: FastAPI):
     setup_logging()
     logger.info("Starting AI Chatbot API")
-    # Initialize MongoDB connection before handling requests
+    from app.config import get_config
+    cfg = get_config()
+    key = cfg["settings"].openrouter_api_key
+    logger.info("OPENROUTER_API_KEY: set=%s", bool(key and len(key) > 10))
+    if not key or len(key) < 10:
+        logger.warning("OPENROUTER_API_KEY is missing or too short - chat will fail. Set it in .env and restart.")
     from app.services.mongodb import get_mongo_client
     await get_mongo_client()
     yield
@@ -48,8 +54,28 @@ async def add_request_id(request, call_next):
     return response
 
 
-app.include_router(chat.router, prefix="/api", tags=["chat"])
-app.include_router(history.router, prefix="/api", tags=["history"])
+# Stream test must be registered first to avoid conflicts
+async def _stream_test_gen():
+    yield "stream "
+    yield "ok"
+
+
+@app.get("/api/stream-test", include_in_schema=False)
+async def stream_test():
+    return StreamingResponse(
+        _stream_test_gen(),
+        media_type="text/plain; charset=utf-8",
+        headers={"X-Accel-Buffering": "no"},
+    )
+
+
+app.include_router(chat.router, prefix="/api")
+app.include_router(history.router, prefix="/api")
+app.include_router(crawler.router, prefix="/api")
+app.include_router(url_search.router, prefix="/api")
+app.include_router(media_search.router, prefix="/api")
+app.include_router(coverage.router, prefix="/api")
+app.include_router(system_metrics.router)
 app.include_router(health_router, tags=["health"])
 app.include_router(metrics_router, tags=["metrics"])
 

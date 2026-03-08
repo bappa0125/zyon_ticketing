@@ -7,8 +7,8 @@ import { ChatInput } from "@/components/ChatInput";
 
 function getApiUrl(): string {
   if (typeof window === "undefined") return process.env.NEXT_PUBLIC_API_URL || "http://localhost/api";
-  const { protocol, hostname } = window.location;
-  return `${protocol}//${hostname}/api`;
+  // Always use relative /api - Next.js rewrites proxy to backend when on port 3000
+  return "/api";
 }
 
 export default function Home() {
@@ -36,7 +36,10 @@ export default function Home() {
       console.error("createNewChat failed:", err);
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: `Setup error: ${err instanceof Error ? err.message : "Could not create conversation. Is the backend running?"}` },
+        {
+          role: "assistant",
+          content: `Setup error: ${err instanceof Error ? err.message : "Could not create conversation."}\n\nPlease use **http://localhost** (not :3000). Ensure Docker is running: \`docker compose ps\`.`,
+        },
       ]);
     }
   };
@@ -87,6 +90,7 @@ export default function Home() {
         if (done) break;
         const chunk = decoder.decode(value, { stream: true });
         fullContent += chunk;
+        setLoading(false); // Unfreeze input as soon as first chunk arrives (stream may not close)
         setMessages((prev) => {
           const next = [...prev];
           const last = next[next.length - 1];

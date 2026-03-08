@@ -1,0 +1,8 @@
+# Trusted sources - add +20 to quality score
+trusted_domains:
+  - techcrunch.com
+  - inc42.com
+  - yourstory.com
+  - business-standard.com
+  - economictimes.indiatimes.com
+  - venturebeat.com

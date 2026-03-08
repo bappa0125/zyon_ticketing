@@ -1,0 +1,35 @@
+# Media sources for article indexing
+# domain, rss_feed (optional), crawl_frequency_minutes
+
+sources:
+  - domain: techcrunch.com
+    rss_feed: https://techcrunch.com/feed/
+    crawl_frequency: 30
+
+  - domain: business-standard.com
+    rss_feed: https://www.business-standard.com/rss/home_page_top_stories.rss
+    crawl_frequency: 60
+
+  - domain: economictimes.indiatimes.com
+    rss_feed: https://economictimes.indiatimes.com/rssfeedstopstories.cms
+    crawl_frequency: 60
+
+  - domain: yourstory.com
+    rss_feed: https://yourstory.com/feed
+    crawl_frequency: 60
+
+  - domain: inc42.com
+    rss_feed: https://inc42.com/feed/
+    crawl_frequency: 60
+
+  - domain: techinasia.com
+    rss_feed: https://www.techinasia.com/feed
+    crawl_frequency: 60
+
+  - domain: medium.com
+    rss_feed: null
+    crawl_frequency: 120
+
+  - domain: substack.com
+    rss_feed: null
+    crawl_frequency: 120

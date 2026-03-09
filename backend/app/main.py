@@ -27,8 +27,13 @@ async def lifespan(app: FastAPI):
     from app.services.mongodb import get_mongo_client
     await get_mongo_client()
     from app.core.social_posts_indexes import ensure_social_posts_indexes
+    from app.core.ingestion_indexes import ensure_ingestion_indexes
     await ensure_social_posts_indexes()
+    await ensure_ingestion_indexes()
+    from app.core.ingestion_scheduler import start_scheduler, stop_scheduler
+    start_scheduler()
     yield
+    stop_scheduler()
     logger.info("Shutting down AI Chatbot API")
 
 

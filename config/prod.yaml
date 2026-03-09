@@ -2,6 +2,20 @@
 # Loaded when APP_ENV=prod
 # Values overridden by environment variables in AWS
 
+# Ingestion scheduler (runs in backend process)
+scheduler:
+  enabled: true
+  rss_interval_hours: 4
+  article_fetcher_interval_minutes: 10
+  entity_mentions_interval_minutes: 15
+  reddit_interval_minutes: 120
+  youtube_interval_minutes: 120
+  crawler_enqueue_interval_minutes: 30
+
+# Step stream disabled in production (enable only for debugging)
+chat:
+  debug_step_stream: false
+
 app:
   name: zyon-chatbot
   env: prod

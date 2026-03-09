@@ -135,13 +135,15 @@ TRIGGER_PATTERNS = [
     r"\b(give\s+me|show\s+me|list|find)\s+.*\s+(websites?|urls?|links?|sites?|mentions?|articles?)\b",
     r"\b\d+\s+(websites?|urls?|sites?|articles?)\s+where\b",
     r"\b(recent|latest|most\s+recent)\s+(mentions?|articles?|news|coverage)\b",
+    r"\b(latest|recent)\s+results?\s+(on|about)\b",
+    r"\bgive\s+me\s+(the\s+)?(latest|recent)\s+results?\s+(on|about)\b",
     r"\bfind\s+.*\s+(mentions?|articles?|coverage)\b",
     r"\bsearch\s+for\s+.*\s+(mentions?|articles?)\b",
     r"\bmost\s+recent\s+mentions?\b",
 ]
 
 # Simpler: message has a domain (X.com) or entity + any of these words
-TRIGGER_WORDS = {"mention", "mentions", "mentioned", "article", "articles", "news", "website", "websites", "url", "urls", "link", "links", "coverage", "find", "search", "recent", "latest"}
+TRIGGER_WORDS = {"mention", "mentions", "mentioned", "article", "articles", "news", "website", "websites", "url", "urls", "link", "links", "coverage", "find", "search", "recent", "latest", "result", "results"}
 
 
 def extract_company_or_topic(message: str) -> str | None:
@@ -208,6 +210,7 @@ RECALL_QUESTIONS_PATTERNS = [
 # Suggested prompts - shown when user asks something out of scope
 SUGGESTED_PROMPTS = [
     "Give me the latest articles about Sahi",
+    "Give me the latest result on Sahi app",
     "Show me recent mentions of Zerodha",
     "Find articles about Upstox",
     "Latest news on Groww",
@@ -285,6 +288,17 @@ def _extract_entity(message: str) -> str:
     )
     if on_match:
         entity = on_match.group(1).strip()
+        if len(entity) > 2 and len(entity) < 100:
+            return entity
+
+    # "latest result on X" / "recent results about X"
+    result_match = re.search(
+        r'\b(?:latest|recent)\s+results?\s+(?:on|about)\s+([^.?!]+?)(?:\s+and\s+|\s+with\s+|\s*$|\.)',
+        message,
+        re.I,
+    )
+    if result_match:
+        entity = result_match.group(1).strip()
         if len(entity) > 2 and len(entity) < 100:
             return entity
 

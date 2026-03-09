@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Improve entity detection accuracy and avoid false positives (e.g. "Sahi" as Hindi word meaning "correct").
+Improve entity detection accuracy and avoid false positives (e.g. "Sahi" as Hindi word meaning "correct"). The detection logic has been extended to a **multi-layer pipeline** (ignore → alias → regex → NER → LLM fallback). See **docs/features/entity_detection.md** for the full pipeline, configuration, and when the LLM is used.
 
 ## Configuration
 

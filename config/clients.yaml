@@ -1,17 +1,54 @@
-# Client monitoring configuration
-# Add new clients without code changes
-# aliases: optional list for entity detection (Feature 7.0)
-
 clients:
+
   - name: Sahi
     domain: sahi.com
+
     competitors:
       - Zerodha
       - Upstox
       - Groww
+      - Angel One
+      - Dhan
+      - Fyers
+      - Alice Blue
+      - 5paisa
+      - Kotak Securities
+      - ICICI Direct
+      - HDFC Securities
+
     aliases:
       - sahi trading
       - sahi trading app
-      - sahi derivatives
-      - sahi platform
       - sahi brokerage
+      - sahi derivatives
+      - sahi investment app
+      - sahi trading platform
+      - sahi options trading
+      - sahi app
+      - sahi fintech
+      - sahi stock trading
+      - sahi broker
+      - sahi investing platform
+      - sahi discount broker
+      - sahi capital markets
+      - sahi retail trading app
+      - sahi derivatives trading
+      - sahi markets platform
+
+    # Context keywords: entity mention valid only if at least one appears in article text (reduces false positives)
+    context_keywords:
+      - trading
+      - broker
+      - brokerage
+      - demat
+      - stock
+      - derivatives
+      - investment
+      - fintech
+    ignore_patterns:
+      - sahi hai
+      - bilkul sahi
+      - sahi baat
+      - bilkul sahi hai
+      - sahi kaha
+      - theek sahi

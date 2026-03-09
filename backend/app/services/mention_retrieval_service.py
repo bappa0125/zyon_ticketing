@@ -1,4 +1,4 @@
-"""Retrieve mentions from all monitoring sources (media_articles, social_posts)."""
+"""Retrieve mentions from all monitoring sources (entity_mentions, media_articles, social_posts)."""
 from datetime import datetime
 from typing import Any
 
@@ -7,9 +7,12 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
+ENTITY_MENTIONS_COLLECTION = "entity_mentions"
+ARTICLE_DOCUMENTS_COLLECTION = "article_documents"
 MEDIA_COLLECTION = "media_articles"
 SOCIAL_COLLECTION = "social_posts"
 MIN_MENTIONS = 10
+DB_FIRST_LIMIT = 10
 
 
 def _get_db_sync():
@@ -51,6 +54,132 @@ def _format_ts(obj: Any) -> str:
         return ""
 
 
+def _published_at_for_sort(doc: dict) -> datetime:
+    """Get sort key from doc: published_at or timestamp."""
+    for key in ("published_at", "timestamp", "fetched_at"):
+        v = doc.get(key)
+        if v is not None:
+            return _to_timestamp(v)
+    return datetime.min
+
+
+def retrieve_mentions_db_first(entity: str, limit: int = DB_FIRST_LIMIT) -> list[dict[str, Any]]:
+    """
+    DB-first retrieval: query entity_mentions, media_articles, social_posts.
+    Returns list with title, source_domain, published_at, summary, sentiment, url, type.
+    Sort by published_at descending. Used to avoid live search when MongoDB has results.
+    """
+    if not entity or not entity.strip():
+        return []
+    entity = entity.strip()
+    results: list[dict[str, Any]] = []
+    try:
+        db = _get_db_sync()
+    except Exception as e:
+        logger.warning("mention_retrieval_db_failed", error=str(e))
+        return []
+
+    try:
+        # 1. entity_mentions (if collection exists and has entity field)
+        try:
+            em_coll = db[ENTITY_MENTIONS_COLLECTION]
+            for doc in em_coll.find({"entity": entity}).sort("published_at", -1).limit(limit):
+                try:
+                    pub = doc.get("published_at") or doc.get("timestamp")
+                    results.append({
+                        "title": str(doc.get("title") or "")[:500],
+                        "source_domain": str(doc.get("source_domain") or doc.get("source") or "")[:200],
+                        "published_at": _format_ts(pub),
+                        "summary": str(doc.get("summary") or doc.get("snippet") or "")[:500],
+                        "sentiment": doc.get("sentiment"),
+                        "url": str(doc.get("url") or "")[:500],
+                        "type": str(doc.get("type") or "article")[:50],
+                        "_sort": _published_at_for_sort(doc),
+                    })
+                except Exception:
+                    continue
+        except Exception as e:
+            logger.debug("entity_mentions_query_skip", error=str(e))
+
+        # 2. article_documents (by entities list)
+        try:
+            art_coll = db[ARTICLE_DOCUMENTS_COLLECTION]
+            for doc in art_coll.find({"entities": entity}).sort("published_at", -1).limit(limit):
+                try:
+                    pub = doc.get("published_at") or doc.get("fetched_at")
+                    summary = (doc.get("summary") or doc.get("article_text") or "")[:500]
+                    results.append({
+                        "title": str(doc.get("title") or "")[:500],
+                        "source_domain": str(doc.get("source_domain") or doc.get("source") or "")[:200],
+                        "published_at": _format_ts(pub),
+                        "summary": summary,
+                        "sentiment": doc.get("sentiment"),
+                        "url": str(doc.get("url") or doc.get("url_resolved") or "")[:500],
+                        "type": "article",
+                        "_sort": _published_at_for_sort(doc),
+                    })
+                except Exception:
+                    continue
+        except Exception as e:
+            logger.debug("article_documents_query_skip", error=str(e))
+
+        # 3. media_articles
+        media_coll = db[MEDIA_COLLECTION]
+        for doc in media_coll.find({"entity": entity}).sort("published_at", -1).limit(limit):
+            try:
+                ts = doc.get("published_at") or doc.get("timestamp")
+                results.append({
+                    "title": str(doc.get("title") or "")[:500],
+                    "source_domain": str(doc.get("source") or "")[:200],
+                    "published_at": _format_ts(ts),
+                    "summary": str(doc.get("snippet") or "")[:500],
+                    "sentiment": doc.get("sentiment"),
+                    "url": str(doc.get("url") or "")[:500],
+                    "type": "article",
+                    "_sort": _published_at_for_sort(doc),
+                })
+            except Exception:
+                continue
+
+        # 4. social_posts
+        social_coll = db[SOCIAL_COLLECTION]
+        for doc in social_coll.find({"entity": entity}).sort("published_at", -1).limit(limit):
+            try:
+                platform = str(doc.get("platform") or "").lower() or "social"
+                text = str(doc.get("text") or "")[:300]
+                title = text[:80] + "..." if len(text) > 80 else text or f"{platform} post"
+                ts = doc.get("published_at") or doc.get("timestamp")
+                results.append({
+                    "title": title,
+                    "source_domain": platform[:200],
+                    "published_at": _format_ts(ts),
+                    "summary": text[:500],
+                    "sentiment": doc.get("sentiment"),
+                    "url": str(doc.get("url") or "")[:500],
+                    "type": platform if platform in ("reddit", "youtube", "twitter") else "article",
+                    "_sort": _published_at_for_sort(doc),
+                })
+            except Exception:
+                continue
+
+    except Exception as e:
+        logger.warning("mention_retrieval_db_first_failed", entity=entity, error=str(e))
+        return []
+
+    # Dedupe by url, sort by published_at desc, limit
+    seen_urls: set[str] = set()
+    unique: list[dict] = []
+    for r in sorted(results, key=lambda x: x.get("_sort", datetime.min), reverse=True):
+        url = (r.get("url") or "").strip().lower()
+        if url and url not in seen_urls:
+            seen_urls.add(url)
+            r2 = {k: v for k, v in r.items() if k != "_sort"}
+            unique.append(r2)
+            if len(unique) >= limit:
+                break
+    return unique
+
+
 def retrieve_mentions(entity: str, min_count: int = MIN_MENTIONS) -> list[dict[str, Any]]:
     """
     Retrieve mentions from media_articles and social_posts for entity.
@@ -69,10 +198,10 @@ def retrieve_mentions(entity: str, min_count: int = MIN_MENTIONS) -> list[dict[s
         social_coll = db[SOCIAL_COLLECTION]
 
         # Query media_articles for entity
-        media_cursor = media_coll.find({"entity": entity}).sort("timestamp", -1).limit(20)
+        media_cursor = media_coll.find({"entity": entity}).sort("published_at", -1).limit(20)
         for doc in media_cursor:
             try:
-                ts = doc.get("timestamp")
+                ts = doc.get("published_at") or doc.get("timestamp")
                 title = doc.get("title") or ""
                 results.append({
                     "title": str(title)[:500],
@@ -80,6 +209,8 @@ def retrieve_mentions(entity: str, min_count: int = MIN_MENTIONS) -> list[dict[s
                     "summary": str(doc.get("snippet") or "")[:300],
                     "url": str(doc.get("url") or "")[:500],
                     "timestamp": _format_ts(ts),
+                    "published_at": _format_ts(ts),
+                    "sentiment": doc.get("sentiment"),
                     "type": "article",
                 })
             except Exception as e:
@@ -87,7 +218,7 @@ def retrieve_mentions(entity: str, min_count: int = MIN_MENTIONS) -> list[dict[s
                 continue
 
         # Query social_posts for entity
-        social_cursor = social_coll.find({"entity": entity}).sort("timestamp", -1).limit(20)
+        social_cursor = social_coll.find({"entity": entity}).sort("published_at", -1).limit(20)
         for doc in social_cursor:
             try:
                 platform = str(doc.get("platform") or "").lower()
@@ -99,13 +230,15 @@ def retrieve_mentions(entity: str, min_count: int = MIN_MENTIONS) -> list[dict[s
                 title = text[:80] + "..." if len(text) > 80 else text
                 if not title:
                     title = f"{platform} post"
-                ts = doc.get("timestamp")
+                ts = doc.get("published_at") or doc.get("timestamp")
                 results.append({
                     "title": title,
                     "source": platform or "social",
                     "summary": text,
                     "url": str(doc.get("url") or "")[:500],
                     "timestamp": _format_ts(ts),
+                    "published_at": _format_ts(ts),
+                    "sentiment": doc.get("sentiment"),
                     "type": t,
                 })
             except Exception as e:

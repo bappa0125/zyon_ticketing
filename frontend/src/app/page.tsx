@@ -5,10 +5,31 @@ import { ChatSidebar } from "@/components/ChatSidebar";
 import { ChatMessage } from "@/components/ChatMessage";
 import { ChatInput } from "@/components/ChatInput";
 
+const STEP_PREFIX = "[STEP]";
+
+export interface PipelineStep {
+  label: string;
+  detail: string;
+}
+
 function getApiUrl(): string {
   if (typeof window === "undefined") return process.env.NEXT_PUBLIC_API_URL || "http://localhost/api";
-  // Always use relative /api - Next.js rewrites proxy to backend when on port 3000
   return "/api";
+}
+
+function parseStepLine(line: string): PipelineStep | null {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith(STEP_PREFIX)) return null;
+  try {
+    const json = trimmed.slice(STEP_PREFIX.length);
+    const obj = JSON.parse(json) as { label?: string; detail?: string };
+    if (obj && typeof obj.label === "string") {
+      return { label: obj.label, detail: typeof obj.detail === "string" ? obj.detail : "" };
+    }
+  } catch {
+    // ignore malformed
+  }
+  return null;
 }
 
 export default function Home() {
@@ -17,6 +38,7 @@ export default function Home() {
   const [conversations, setConversations] = useState<{ id: string; title: string }[]>([]);
   const [loading, setLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [responseSteps, setResponseSteps] = useState<PipelineStep[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -65,6 +87,7 @@ export default function Home() {
     const userMsg = { role: "user", content: text };
     setMessages((prev) => [...prev, userMsg]);
     setLoading(true);
+    setResponseSteps([]);
 
     try {
       const res = await fetch(`${getApiUrl()}/chat`, {
@@ -82,15 +105,25 @@ export default function Home() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let fullContent = "";
+      let buffer = "";
 
       setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        fullContent += chunk;
-        setLoading(false); // Unfreeze input as soon as first chunk arrives (stream may not close)
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          const step = parseStepLine(line);
+          if (step) {
+            setResponseSteps((prev) => [...prev, step]);
+          } else {
+            fullContent += line + "\n";
+          }
+        }
+        setLoading(false);
         setMessages((prev) => {
           const next = [...prev];
           const last = next[next.length - 1];
@@ -99,6 +132,22 @@ export default function Home() {
           }
           return next;
         });
+      }
+      if (buffer) {
+        const step = parseStepLine(buffer);
+        if (step) {
+          setResponseSteps((prev) => [...prev, step]);
+        } else {
+          fullContent += buffer;
+          setMessages((prev) => {
+            const next = [...prev];
+            const last = next[next.length - 1];
+            if (last.role === "assistant") {
+              next[next.length - 1] = { ...last, content: fullContent };
+            }
+            return next;
+          });
+        }
       }
     } catch (err) {
       setMessages((prev) => [
@@ -135,9 +184,32 @@ export default function Home() {
                 </ul>
               </div>
             )}
-            {messages.map((msg, i) => (
+            {messages.slice(0, -1).map((msg, i) => (
               <ChatMessage key={i} role={msg.role} content={msg.content} />
             ))}
+            {messages.length > 0 && (() => {
+              const last = messages[messages.length - 1];
+              const isAssistant = last.role === "assistant";
+              const showSteps = isAssistant && responseSteps.length > 0;
+              return (
+                <>
+                  {showSteps && (
+                    <div className="rounded-lg border border-amber-500/30 bg-amber-950/20 px-4 py-3 mb-2 text-left">
+                      <p className="text-xs font-medium text-amber-400/90 mb-2">Pipeline steps</p>
+                      <ol className="list-decimal list-inside space-y-1 text-sm text-zinc-400">
+                        {responseSteps.map((s, idx) => (
+                          <li key={idx}>
+                            <span className="text-zinc-300">{s.label}</span>
+                            {s.detail && <span className="text-zinc-500"> — {s.detail}</span>}
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                  )}
+                  <ChatMessage key={messages.length - 1} role={last.role} content={last.content} />
+                </>
+              );
+            })()}
             {loading && messages[messages.length - 1]?.role === "user" && (
               <ChatMessage role="assistant" content="..." />
             )}

@@ -71,5 +71,7 @@ def get_config() -> dict[str, Any]:
         "media_ingestion": base.get("media_ingestion", {}),
         "media_mention": base.get("media_mention", {}),
         "monitoring": load_monitoring_yaml().get("monitoring", {}),
+        "chat": base.get("chat", {}),
+        "scheduler": base.get("scheduler", {}),
         "settings": settings,
     }

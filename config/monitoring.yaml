@@ -46,5 +46,8 @@ monitoring:
   ingestion:
     batch_size: 20
 
+  rss_ingestion:
+    freshness_window_hours: 72
+
   crawling:
     interval_minutes: 30

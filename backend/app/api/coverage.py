@@ -58,11 +58,11 @@ async def api_coverage_timeline(
     """Mention counts grouped by date."""
     coll = _get_media_articles()
     match_company = {"$regex": company, "$options": "i"}
-    q = {"$or": [{"entities_detected": match_company}, {"entities": match_company}]}
+    q = {"$or": [{"entity": match_company}, {"entities_detected": match_company}, {"entities": match_company}]}
     cursor = coll.find(q)
     by_day: dict[str, int] = {}
     for doc in cursor:
-        dt = doc.get("publish_date") or doc.get("timestamp_indexed")
+        dt = doc.get("published_at") or doc.get("publish_date") or doc.get("timestamp_indexed")
         dstr = _date_str(dt)
         if dstr:
             by_day[dstr] = by_day.get(dstr, 0) + 1
@@ -83,7 +83,7 @@ async def api_coverage_compare(
     coll = _get_media_articles()
     counts = {}
     for company in names:
-        n = coll.count_documents({"$or": [{"entities_detected": {"$regex": company, "$options": "i"}}, {"entities": {"$regex": company, "$options": "i"}}]})
+        n = coll.count_documents({"$or": [{"entity": {"$regex": company, "$options": "i"}}, {"entities_detected": {"$regex": company, "$options": "i"}}, {"entities": {"$regex": company, "$options": "i"}}]})
         counts[company] = n
     return counts
 
@@ -97,12 +97,12 @@ async def api_coverage_topics(
     import re
     coll = _get_media_articles()
     match_company = {"$regex": company, "$options": "i"}
-    q = {"$or": [{"entities_detected": match_company}, {"entities": match_company}]}
+    q = {"$or": [{"entity": match_company}, {"entities_detected": match_company}, {"entities": match_company}]}
     cursor = coll.find(q)
     stopwords = {"the", "and", "for", "with", "from", "that", "this", "has", "have", "are", "was", "were", "its", "said", "per", "will", "can", "not", "but", "they", "their"}
     freq = {}
     for doc in cursor:
-        text = f"{doc.get('title','')} {doc.get('content','')} {doc.get('content_preview','')}".lower()
+        text = f"{doc.get('title','')} {doc.get('content','')} {doc.get('content_preview','')} {doc.get('snippet','')}".lower()
         words = re.findall(r"\b[a-z]{5,}\b", text)
         for w in words:
             if w not in stopwords and not w.isdigit():

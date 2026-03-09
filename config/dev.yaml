@@ -1,6 +1,20 @@
 # Development configuration
 # Loaded when APP_ENV=dev
 
+# Ingestion scheduler (runs in backend process)
+scheduler:
+  enabled: true
+  rss_interval_hours: 4
+  article_fetcher_interval_minutes: 10
+  entity_mentions_interval_minutes: 15
+  reddit_interval_minutes: 120
+  youtube_interval_minutes: 120
+  crawler_enqueue_interval_minutes: 30
+
+# Temporary: stream pipeline steps to the UI when user asks a question (set to false to disable)
+chat:
+  debug_step_stream: true
+
 app:
   name: zyon-chatbot
   env: dev

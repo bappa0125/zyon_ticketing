@@ -1,11 +1,11 @@
-"""Media index search API - POST /api/media/search."""
+"""Media search API — POST /api/media/search. Uses MongoDB media_articles only."""
 import asyncio
 
 from fastapi import APIRouter
 from pydantic import BaseModel
 
 from app.core.logging import get_logger
-from app.services.media_index import article_search
+from app.services.media_article_search import search as media_article_search
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -17,30 +17,32 @@ class MediaSearchRequest(BaseModel):
 
 @router.post("/media/trigger-index")
 async def trigger_media_index():
-    """Manually trigger incremental media ingestion."""
-    import asyncio
-    from app.services.media_ingestion.ingestion_scheduler import run_incremental_ingestion
-    count = await asyncio.to_thread(run_incremental_ingestion)
-    return {"indexed": count}
+    """Trigger RSS ingestion + article fetcher (replaces removed media_ingestion)."""
+    from app.services.monitoring_ingestion.rss_ingestion import run_rss_ingestion
+    from app.services.monitoring_ingestion.article_fetcher import run_article_fetcher
+
+    rss_result = await run_rss_ingestion()
+    fetcher_result = await run_article_fetcher()
+    return {
+        "rss_inserted": rss_result.get("fresh_items_inserted", 0),
+        "articles_fetched": fetcher_result.get("articles_fetched", 0),
+    }
 
 
 @router.post("/media/trigger-initial")
 async def trigger_initial_ingestion():
-    """Run initial ingestion: all sources, up to 200 articles per source."""
-    import asyncio
-    from app.services.media_ingestion.ingestion_scheduler import run_initial_ingestion
-    count = await asyncio.to_thread(run_initial_ingestion)
-    return {"indexed": count}
+    """Alias for trigger_media_index — runs RSS + article fetcher once."""
+    return await trigger_media_index()
 
 
 @router.post("/media/search")
 async def media_search(request: MediaSearchRequest):
-    """Search internal media index. Returns top 10 articles."""
+    """Search media_articles via MongoDB. Returns top 10 articles."""
     query = (request.query or "").strip()
     if not query:
         return {"results": [], "message": "query required"}
     try:
-        results = await asyncio.to_thread(article_search.search, query, limit=10)
+        results = await asyncio.to_thread(media_article_search, query, 10, True)
         try:
             from redis import Redis
             from app.config import get_config

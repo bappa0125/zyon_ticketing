@@ -57,13 +57,13 @@ async def run_media_monitor() -> dict:
                         continue
                     seen_urls.add(url)
 
+                    pub_at = a.get("published_at") or a.get("timestamp") or datetime.utcnow()
                     doc = {
                         "entity": a.get("entity", entity),
-                        "client": a.get("client", client_name),
                         "title": (a.get("title") or "")[:500],
                         "url": url,
                         "source": (a.get("source") or "")[:200],
-                        "timestamp": a.get("timestamp", datetime.utcnow()),
+                        "published_at": pub_at,
                         "snippet": (a.get("snippet") or "")[:500],
                     }
 

@@ -31,6 +31,34 @@ LLM_MAX_TOKENS = 200
 TITLE_SIMILARITY_THRESHOLD = 0.85
 
 
+def _strip_html(text: str, max_len: int = 500) -> str:
+    """Strip HTML tags from summary/snippet so we never show raw <a href=...> in the UI."""
+    if not text or not isinstance(text, str):
+        return ""
+    s = text.strip()
+    if "<" not in s and ">" not in s:
+        return s[:max_len]
+    try:
+        soup = BeautifulSoup(s, "html.parser")
+        return soup.get_text(separator=" ", strip=True)[:max_len]
+    except Exception:
+        return s[:max_len]
+
+
+def _resolve_google_news_url(url: str, timeout: float = 4.0) -> str:
+    """Resolve Google News redirect URL to final article URL. Returns original on failure."""
+    if not url or "news.google.com" not in url:
+        return url or ""
+    try:
+        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+            resp = client.get(url, headers={"User-Agent": "ZyonMentionSearch/1.0"})
+            final = str(resp.url)
+            return final if final and "news.google.com" not in final else url
+    except Exception as e:
+        logger.debug("resolve_google_news_url_failed", url=url[:80], error=str(e))
+        return url
+
+
 def _fetch_article_text(url: str, max_chars: int = VALIDATION_CHARS) -> tuple[str, bool]:
     """Fetch article page, extract first max_chars. Returns (text, success)."""
     try:
@@ -161,6 +189,26 @@ def _quality_score(
     return min(100, score)
 
 
+def _to_sortable_ts(r: dict) -> float:
+    """Extract publish/timestamp from result to epoch float for sorting (newest first)."""
+    pub = r.get("publish_date") or r.get("timestamp") or r.get("date")
+    if pub is None or pub == "":
+        return 0.0
+    try:
+        from time import struct_time
+        if isinstance(pub, struct_time):
+            return datetime(*pub[:6]).timestamp()
+        if isinstance(pub, datetime):
+            return pub.timestamp() if hasattr(pub, "timestamp") else 0.0
+        s = str(pub).strip()
+        if "T" in s or "-" in s:
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+            return dt.timestamp() if hasattr(dt, "timestamp") else 0.0
+    except Exception:
+        pass
+    return 0.0
+
+
 def _format_date(pub) -> str:
     """Format publish date as readable string, e.g. Mar 5, 2025."""
     if pub is None or pub == "":
@@ -189,15 +237,20 @@ def _search_google_news_rss(company: str, max_results: int = 5) -> list[dict]:
         feed = feedparser.parse(url, agent="ZyonMentionSearch/1.0")
         for e in feed.entries[:max_results]:
             link = e.get("link") or e.get("id", "")
-            if link:
-                pub = e.get("published_parsed") or e.get("updated_parsed") or e.get("published")
-                results.append({
-                    "title": (e.get("title") or "")[:500],
-                    "link": link,
-                    "source": (e.get("source", {}).get("title", "")) if isinstance(e.get("source"), dict) else "",
-                    "snippet": (e.get("summary", "") or "")[:300],
-                    "publish_date": _format_date(pub),
-                })
+            if not link:
+                continue
+            if "news.google.com" in link:
+                link = _resolve_google_news_url(link)
+            raw_summary = (e.get("summary") or "") if hasattr(e, "summary") else ""
+            snippet = _strip_html(raw_summary, 300)
+            pub = e.get("published_parsed") or e.get("updated_parsed") or e.get("published")
+            results.append({
+                "title": (e.get("title") or "")[:500],
+                "link": link,
+                "source": (e.get("source", {}).get("title", "")) if isinstance(e.get("source"), dict) else "",
+                "snippet": snippet,
+                "publish_date": _format_date(pub),
+            })
     except Exception as e:
         logger.warning("google_news_rss_failed", company=company, error=str(e))
     return results
@@ -268,11 +321,11 @@ def _llm_rerank(articles: list[dict], company: str) -> list[dict]:
     return articles
 
 
-def _fetch_more_articles(company: str) -> list[dict]:
-    """Fetch more articles via media_monitor_service (Google News + DuckDuckGo)."""
+def _fetch_more_articles(search_query: str, client: str) -> list[dict]:
+    """Fetch more articles via media_monitor_service (Google News + DuckDuckGo). search_query may be disambiguated (e.g. Sahi trading)."""
     try:
         from app.services.media_monitor_service import search_entity
-        items = search_entity(company, company, sources=["google_news", "duckduckgo"])
+        items = search_entity(search_query, client, sources=["google_news", "duckduckgo"])
         out = []
         for r in items:
             out.append({
@@ -290,18 +343,51 @@ def _fetch_more_articles(company: str) -> list[dict]:
         return []
 
 
+def _get_disambiguated_search_query(company: str) -> str:
+    """Use context_keywords to disambiguate (e.g. Sahi -> Sahi trading)."""
+    try:
+        from app.services.mention_context_validation import get_disambiguated_search_query
+        return get_disambiguated_search_query(company) or company
+    except Exception:
+        return company
+
+
+def _filter_by_context_keywords(results: list[dict], company: str) -> list[dict]:
+    """Filter out results that don't contain any context_keyword when entity is ambiguous."""
+    try:
+        from app.services.mention_context_validation import get_context_keywords
+        keywords = get_context_keywords(company)
+        if not keywords:
+            return results
+        kept = []
+        for r in results:
+            title = (r.get("title") or "").strip()
+            snippet = (r.get("snippet") or r.get("summary") or "").strip()
+            text = (title + " " + snippet).lower()
+            if any(kw.strip().lower() in text for kw in keywords if kw):
+                kept.append(r)
+            else:
+                logger.debug("mention_context_filtered", title=title[:60], entity=company)
+        return kept
+    except Exception:
+        return results
+
+
 def _retrieval_to_mention(r: dict) -> dict:
     """Convert mention_retrieval output to search_mentions output format."""
     url = r.get("url", "")
+    summary = r.get("summary", "")
     return {
         "title": r.get("title", ""),
         "link": url,
         "url": url,
         "source": r.get("source", ""),
-        "summary": r.get("summary", ""),
-        "snippet": (r.get("summary") or "")[:200],
+        "source_domain": r.get("source", ""),
+        "summary": summary,
+        "snippet": summary[:200] if summary else "",
         "timestamp": r.get("timestamp", ""),
-        "publish_date": r.get("timestamp", ""),
+        "publish_date": r.get("published_at") or r.get("timestamp", ""),
+        "sentiment": r.get("sentiment"),
         "type": r.get("type", "article"),
     }
 
@@ -314,15 +400,45 @@ def search_mentions(
     llm_rerank: bool = True,
 ) -> list[dict]:
     """
-    Retrieve mentions from all monitoring sources (media_articles, social_posts) via
-    mention_retrieval_service. If fewer than MIN_MENTIONS, trigger article discovery
-    (Google News + DuckDuckGo). Returns unified list: title, source, summary, url,
-    timestamp, type (article|reddit|youtube|twitter).
+    Always run MongoDB search first. If MongoDB returns any results, use them and do not run live search.
+    Only when MongoDB returns no results do we run live search (internal, Google News, external).
+    Returns unified list: title, source, summary, url, timestamp, type (article|reddit|youtube|twitter).
     """
     all_results: list[dict] = []
     seen_urls: set[str] = set()
+    mongodb_had_results = False
 
-    # 1. Retrieve from MongoDB (media_articles, social_posts)
+    # 1. Always try MongoDB first (entity_mentions, article_documents, media_articles, social_posts)
+    try:
+        from app.services.mention_retrieval_service import retrieve_mentions_db_first
+        db_first = retrieve_mentions_db_first(company, limit=10)
+        if db_first:
+            mongodb_had_results = True
+            db_items = [
+                {"title": r.get("title"), "snippet": r.get("summary"), "summary": r.get("summary"), "url": r.get("url"), "source_domain": r.get("source_domain"), "source": r.get("source"), "published_at": r.get("published_at"), "sentiment": r.get("sentiment"), "type": r.get("type", "article")}
+                for r in db_first
+            ]
+            filtered = _filter_by_context_keywords(db_items, company)
+            logger.info("mention_search_db_first_used", company=company, count=len(filtered))
+            return [
+                {
+                    "title": r.get("title", ""),
+                    "link": r.get("url", ""),
+                    "url": r.get("url", ""),
+                    "source": r.get("source_domain", r.get("source", "")),
+                    "score": 80,
+                    "publish_date": r.get("published_at", ""),
+                    "snippet": r.get("summary", ""),
+                    "summary": r.get("summary", ""),
+                    "sentiment": r.get("sentiment"),
+                    "type": r.get("type", "article"),
+                }
+                for r in filtered
+            ]
+    except Exception as e:
+        logger.debug("mention_search_db_first_skip", company=company, error=str(e))
+
+    # 2. MongoDB returned nothing: try secondary MongoDB collections (media_articles, social_posts)
     try:
         from app.services.mention_retrieval_service import retrieve_mentions
         retrieval = retrieve_mentions(company, min_count=MIN_MENTIONS)
@@ -332,39 +448,23 @@ def search_mentions(
             if url and url not in seen_urls:
                 seen_urls.add(url)
                 all_results.append(m)
+        if all_results:
+            mongodb_had_results = True
     except Exception as e:
         logger.warning("mention_retrieval_failed", company=company, error=str(e))
 
-    # 2. If fewer than MIN_MENTIONS, trigger article discovery
-    if len(all_results) < MIN_MENTIONS and use_internal:
-        for r in _fetch_more_articles(company):
-            url = (r.get("url") or r.get("link", "")).strip().lower()
-            if url and url not in seen_urls:
-                seen_urls.add(url)
-                all_results.append(r)
-
-    # 3. Supplement with Google News RSS and external (Tavily/DuckDuckGo) if still short
-    if len(all_results) < MIN_MENTIONS and use_google_news:
-        for r in _search_google_news_rss(company, max_results=5):
-            link = r.get("link", "")
-            url = link.strip().lower() if link else ""
-            if url and url not in seen_urls:
-                seen_urls.add(url)
-                all_results.append({
-                    "title": r.get("title", ""),
-                    "link": link,
-                    "url": link,
-                    "source": r.get("source", "") or urlparse(link).netloc,
-                    "snippet": r.get("snippet", ""),
-                    "publish_date": r.get("publish_date", ""),
-                    "type": "article",
-                })
-
-    if len(all_results) < MIN_MENTIONS and use_external:
-        try:
-            from app.services.url_discovery.url_search_service import search as external_search
-            for r in external_search(f'"{company}" news OR articles OR blog', max_results=10):
-                link = r.get("link", r.get("url", ""))
+    # 3. Only when MongoDB gave no results: run live search (internal, Google News, external)
+    search_query = _get_disambiguated_search_query(company)
+    if not mongodb_had_results and not all_results:
+        if use_internal:
+            for r in _fetch_more_articles(search_query, company):
+                url = (r.get("url") or r.get("link", "")).strip().lower()
+                if url and url not in seen_urls:
+                    seen_urls.add(url)
+                    all_results.append(r)
+        if not all_results and use_google_news:
+            for r in _search_google_news_rss(search_query, max_results=5):
+                link = r.get("link", "")
                 url = link.strip().lower() if link else ""
                 if url and url not in seen_urls:
                     seen_urls.add(url)
@@ -372,18 +472,38 @@ def search_mentions(
                         "title": r.get("title", ""),
                         "link": link,
                         "url": link,
-                        "source": r.get("source", "") or (urlparse(link).netloc if link else ""),
+                        "source": r.get("source", "") or urlparse(link).netloc,
                         "snippet": r.get("snippet", ""),
+                        "publish_date": r.get("publish_date", ""),
                         "type": "article",
                     })
-        except Exception as e:
-            logger.warning("mention_external_failed", company=company, error=str(e))
+        if not all_results and use_external:
+            try:
+                from app.services.url_discovery.url_search_service import search as external_search
+                for r in external_search(f'"{search_query}" news OR articles OR blog', max_results=10):
+                    link = r.get("link", r.get("url", ""))
+                    url = link.strip().lower() if link else ""
+                    if url and url not in seen_urls:
+                        seen_urls.add(url)
+                        all_results.append({
+                            "title": r.get("title", ""),
+                            "link": link,
+                            "url": link,
+                            "source": r.get("source", "") or (urlparse(link).netloc if link else ""),
+                            "snippet": r.get("snippet", ""),
+                            "type": "article",
+                        })
+            except Exception as e:
+                logger.warning("mention_external_failed", company=company, error=str(e))
 
-    # 4. Split: social (from DB) vs articles (may need validation)
+    # 4. Filter all results by context_keywords when entity is ambiguous (e.g. Sahi -> trading only)
+    all_results = _filter_by_context_keywords(all_results, company)
+
+    # 5. Split: social (from DB) vs articles (may need validation)
     social = [r for r in all_results if r.get("type") != "article"]
     articles = [r for r in all_results if r.get("type") == "article"]
 
-    # 5. Validate and score article-type items
+    # 6. Validate and score article-type items
     if articles:
         validated = _validate_and_score(articles, company, max_validate=MAX_VALIDATED)
         validated_urls = {_url_normalize(r.get("link") or r.get("url", "")) for r in validated}
@@ -401,11 +521,12 @@ def search_mentions(
 
     combined = social + articles
 
-    # 6. Sort: social first, then articles by score desc
+    # 7. Sort: social first, then articles; within each group by recency (newest first), then score
     def sort_key(x):
+        ts = _to_sortable_ts(x)
         if x.get("type") != "article":
-            return (0, 0)
-        return (1, -x.get("score", 0))
+            return (0, -ts)
+        return (1, -ts, -x.get("score", 0))
 
     combined.sort(key=sort_key)
     top = combined[:max(MIN_MENTIONS, TOP_RESULTS)]
@@ -420,10 +541,13 @@ def search_mentions(
         {
             "title": r.get("title", ""),
             "link": r.get("link", r.get("url", "")),
-            "source": r.get("source", ""),
+            "url": r.get("link", r.get("url", "")),
+            "source": r.get("source", "") or r.get("source_domain", ""),
             "score": r.get("score", 0),
             "publish_date": _format_date(r.get("publish_date") or r.get("timestamp")),
             "snippet": (r.get("snippet", "") or r.get("summary", "") or "")[:200],
+            "summary": (r.get("summary", "") or r.get("snippet", "") or "")[:400],
+            "sentiment": r.get("sentiment"),
             "type": r.get("type", "article"),
         }
         for r in top

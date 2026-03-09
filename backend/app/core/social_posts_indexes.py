@@ -23,12 +23,22 @@ async def ensure_social_posts_indexes():
         retention_days = social.get("retention_days", 30)
         ttl_seconds = retention_days * 86400
 
-        # TTL index on timestamp — MongoDB deletes docs when timestamp + TTL < current time
-        await coll.create_index(
-            [("timestamp", 1)],
-            expireAfterSeconds=ttl_seconds,
-            name="ttl_timestamp",
-        )
+        # TTL index on published_at — MongoDB deletes docs when published_at + TTL < current time
+        try:
+            await coll.create_index(
+                [("published_at", 1)],
+                expireAfterSeconds=ttl_seconds,
+                name="ttl_published_at",
+            )
+        except Exception:
+            try:
+                await coll.create_index(
+                    [("timestamp", 1)],
+                    expireAfterSeconds=ttl_seconds,
+                    name="ttl_timestamp",
+                )
+            except Exception:
+                pass
         logger.info("social_posts_ttl_index_created", retention_days=retention_days)
 
         # Lookup indexes (content_hash for dedup, entity for filtering)

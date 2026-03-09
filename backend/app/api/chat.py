@@ -1,8 +1,11 @@
 """Chat API - POST /api/chat with streaming."""
+import json
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from bs4 import BeautifulSoup
 
+from app.config import get_config
 from app.services.llm_gateway import LLMGateway
 from app.services import mongodb as db
 from app.services import qdrant_service as qdrant
@@ -21,8 +24,78 @@ class ChatRequest(BaseModel):
     message: str
 
 
+# Step log prefix for temporary debug stream (config: chat.debug_step_stream)
+STEP_PREFIX = "[STEP]"
+
+
+def _step_event(label: str, detail: str = "") -> str:
+    """Return a single line to stream when debug_step_stream is enabled; else empty string."""
+    if not get_config().get("chat", {}).get("debug_step_stream"):
+        return ""
+    return "\n" + STEP_PREFIX + json.dumps({"label": label, "detail": detail}) + "\n"
+
+
+# Number emojis for monitoring-style list (1️⃣ … 10️⃣)
+_NUM_EMOJI = ("1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟")
+
+_TYPE_LABELS = {
+    "article": "News Article",
+    "news": "News Article",
+    "blog": "Blog",
+    "forum": "Forum Mention",
+    "reddit": "Reddit Mention",
+    "youtube": "YouTube Mention",
+    "video": "Video",
+    "twitter": "Twitter Mention",
+    "social": "Social",
+}
+
+
+def _format_mention_date(val) -> str:
+    """Format publish_date/timestamp to 'Mar 5, 2026' style."""
+    if val is None:
+        return ""
+    from datetime import datetime
+    try:
+        if isinstance(val, datetime):
+            return val.strftime("%b %d, %Y")
+        s = str(val).strip()[:30]
+        if not s:
+            return ""
+        if "T" in s or "-" in s:
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+            return dt.strftime("%b %d, %Y")
+    except Exception:
+        pass
+    return s[:20] if s else ""
+
+
+def _strip_html_summary(text: str, max_len: int = 400) -> str:
+    """Strip HTML from summary/snippet so we never show raw <a href=...> in the UI."""
+    if not text or not isinstance(text, str):
+        return ""
+    s = text.strip()[:max_len * 2]
+    if "<" not in s and ">" not in s:
+        return s[:max_len]
+    try:
+        soup = BeautifulSoup(s, "html.parser")
+        return soup.get_text(separator=" ", strip=True)[:max_len]
+    except Exception:
+        return s[:max_len]
+
+
+def _url_display(link: str, max_len: int = 60) -> str:
+    """Shorten URL for display, e.g. https://economictimes… or https://reddit.com/…"""
+    if not link or not isinstance(link, str):
+        return ""
+    s = link.strip()
+    if len(s) <= max_len:
+        return s
+    return s[: max_len - 1].rstrip("/") + "…"
+
+
 def _format_articles_with_links(results: list[dict], topic: str) -> str:
-    """Format search results as markdown: title links, metadata, summary. Paragraph structure for clean UI."""
+    """Format search results like global monitoring tools: numbered, type label, Title/Source/Type/Date/Sentiment/Summary/URL."""
     if not results:
         return f"No mentions found for **{topic}**."
     lines = [f"Here are the latest mentions for **{topic}**:\n"]
@@ -31,30 +104,62 @@ def _format_articles_with_links(results: list[dict], topic: str) -> str:
             title = str(r.get("title") or "Untitled")[:200]
             link = r.get("link") or r.get("url") or ""
             link = str(link)[:500] if link else ""
-            source = str(r.get("source") or "")[:100]
-            date_str = r.get("publish_date") or r.get("timestamp") or ""
-            date_str = str(date_str)[:30] if date_str else ""
-            snippet = str(r.get("snippet") or r.get("summary") or "")[:300]
-            t = str(r.get("type") or "article").capitalize()
-            lines.append(f"---")
+            if link and "news.google.com" in link:
+                try:
+                    from app.services.media_mention.mention_search import _resolve_google_news_url
+                    resolved = _resolve_google_news_url(link, timeout=2.0)
+                    if resolved and "news.google.com" not in resolved:
+                        link = resolved
+                except Exception:
+                    pass
+            link_display = _url_display(link)
+            source_raw = str(r.get("source") or r.get("source_domain") or "").strip()[:100]
+            # Capitalize platforms for display: reddit -> Reddit, youtube -> YouTube
+            _platform_display = {"reddit": "Reddit", "youtube": "YouTube", "twitter": "Twitter"}
+            source = _platform_display.get(source_raw.lower(), source_raw) if source_raw else ""
+            if not source and source_raw:
+                source = source_raw[0].upper() + source_raw[1:].lower() if len(source_raw) > 1 else source_raw.upper()
+            raw_type = str(r.get("type") or "article").lower()
+            type_label = _TYPE_LABELS.get(raw_type) or raw_type.capitalize()
+            date_str = _format_mention_date(r.get("publish_date") or r.get("timestamp"))
+            sentiment = (r.get("sentiment") or "").strip()
+            if sentiment:
+                sentiment = sentiment.capitalize()
+            summary = _strip_html_summary(str(r.get("snippet") or r.get("summary") or ""))
+
+            emoji = _NUM_EMOJI[i - 1] if i <= len(_NUM_EMOJI) else f"{i}."
+            lines.append(f"{emoji} **{type_label}**")
             lines.append("")
-            if link:
-                lines.append(f"**[{i}] [{title}]({link})**")
-            else:
-                lines.append(f"**[{i}] {title}**")
+            lines.append(f"**Title**")
+            lines.append(title)
             lines.append("")
-            meta = []
             if source:
-                meta.append(f"Source: {source}")
-            if date_str:
-                meta.append(f"Date: {date_str}")
-            if t and t != "Article":
-                meta.append(f"Type: {t}")
-            if meta:
-                lines.append(" · ".join(meta))
+                lines.append(f"**Source**")
+                lines.append(source)
                 lines.append("")
-            if snippet:
-                lines.append(snippet)
+            lines.append(f"**Type**")
+            lines.append(type_label)
+            lines.append("")
+            if date_str:
+                lines.append(f"**Date**")
+                lines.append(date_str)
+                lines.append("")
+            if sentiment:
+                lines.append(f"**Sentiment**")
+                lines.append(sentiment)
+                lines.append("")
+            if summary:
+                lines.append(f"**Summary**")
+                lines.append(summary)
+                lines.append("")
+            lines.append(f"**URL**")
+            if link:
+                # Short display text; full URL in link so click goes to article
+                lines.append(f"[{link_display or link[:50] + '…'}]({link})" if len(link) > 60 else link)
+            else:
+                lines.append("—")
+            lines.append("")
+            lines.append("⸻")
             lines.append("")
         except Exception:
             continue
@@ -150,23 +255,41 @@ async def chat_stream(conversation_id: str, user_message: str):
     preliminary = ""
 
     try:
+        line = _step_event("Request received", f"Message length: {len(user_message)}")
+        if line:
+            yield line
         logger.info("chat_stream_start", conv=conversation_id[:8], msg_len=len(user_message))
         user_msg_id = await db.add_message(conversation_id, "user", user_message)
+        line = _step_event("Saved user message", f"Conversation: {conversation_id[:8]}...")
+        if line:
+            yield line
         logger.info("chat_after_add_message")
 
         last_messages = await db.get_last_messages(conversation_id, n=10)
+        line = _step_event("Loaded conversation history", f"{len(last_messages)} messages")
+        if line:
+            yield line
         logger.info("chat_after_get_last_messages", n=len(last_messages))
 
         # Intent classification: gates search pipeline. No LLM calls.
         intent, search_entity = classify_intent(user_message)
         company = search_entity
+        line = _step_event("Intent classification", f"Intent: {intent}" + (f", company: {company}" if company else ""))
+        if line:
+            yield line
 
         # Greetings first: never search, go straight to LLM
         if is_greeting_or_casual(user_message):
+            line = _step_event("Greeting or casual message detected", "Skipping search, going to LLM")
+            if line:
+                yield line
             preliminary = "Thinking...\n\n"
             yield preliminary
             full_response.append(preliminary)
             skip_vector = len(user_message.strip()) < 25
+            line = _step_event("Fetching vector context", "Qdrant similarity search" if not skip_vector else "Skipped (short message)")
+            if line:
+                yield line
             vector_context = [] if skip_vector else await asyncio.to_thread(qdrant.search_similar, conversation_id, user_message, 5)
             msgs = [{"role": "system", "content": SYSTEM_PROMPT}]
             if vector_context:
@@ -175,6 +298,9 @@ async def chat_stream(conversation_id: str, user_message: str):
             for m in last_messages:
                 msgs.append({"role": m["role"], "content": m["content"]})
             msgs.append({"role": "user", "content": user_message})
+            line = _step_event("Streaming LLM response", "Greeting reply")
+            if line:
+                yield line
             gateway = LLMGateway()
             try:
                 async for chunk in gateway.chat_completion(msgs, stream=True, use_web_search=False):
@@ -217,6 +343,9 @@ async def chat_stream(conversation_id: str, user_message: str):
             and not is_follow_up_request(user_message)
             and not is_in_scope_for_search(user_message)
         ):
+            line = _step_event("Out of scope", "Returning suggested prompts (no search, no LLM)")
+            if line:
+                yield line
             out_msg = get_out_of_scope_message()
             yield out_msg
             full_response.append(out_msg)
@@ -237,6 +366,9 @@ async def chat_stream(conversation_id: str, user_message: str):
         is_follow_up = company and is_follow_up_request(user_message)
         skip_vector = len(user_message.strip()) < 25
         if is_recall_questions_request(user_message):
+            line = _step_event("Recall questions", "Loading history and retrieving your questions")
+            if line:
+                yield line
             status = "Looking through your conversation history...\n\n"
             yield status
             full_response.append(status)
@@ -245,10 +377,16 @@ async def chat_stream(conversation_id: str, user_message: str):
             yield status2
             full_response.append(status2)
         elif use_web_search and search_query:
+            line = _step_event("Search gated", f"Query: {search_query}, company: {company}")
+            if line:
+                yield line
             status1 = "Looking through your conversation history...\n\n"
             yield status1
             full_response.append(status1)
             vector_task = asyncio.create_task(asyncio.to_thread(qdrant.search_similar, conversation_id, user_message, 5))
+            line = _step_event("Searching mentions", "RSS, articles, Reddit, YouTube, Twitter")
+            if line:
+                yield line
             status2 = f"Searching RSS feeds, articles, Reddit, YouTube, and Twitter for **{search_query}**...\n\n"
             yield status2
             full_response.append(status2)
@@ -263,21 +401,36 @@ async def chat_stream(conversation_id: str, user_message: str):
                         {
                             "title": r.get("title", ""),
                             "link": r.get("link", r.get("url", "")),
-                            "source": r.get("source", ""),
+                            "url": r.get("link", r.get("url", "")),
+                            "source": r.get("source") or r.get("source_domain", ""),
                             "score": r.get("score"),
                             "publish_date": r.get("publish_date", r.get("timestamp", "")),
                             "snippet": r.get("snippet", r.get("summary", "")),
+                            "summary": r.get("summary", r.get("snippet", "")),
+                            "sentiment": r.get("sentiment"),
                             "type": r.get("type", "article"),
                         }
                         for r in url_results
                     ]
+                    line = _step_event("Mention search complete", f"Found {len(url_results)} results")
+                    if line:
+                        yield line
                     logger.info("chat_mention_search_used", query=search_query, count=len(url_results))
             except asyncio.TimeoutError:
+                line = _step_event("Mention search", "Timeout")
+                if line:
+                    yield line
                 logger.warning("mention_search_timeout", query=search_query)
             except Exception as e:
+                line = _step_event("Mention search", f"Error: {str(e)[:80]}")
+                if line:
+                    yield line
                 logger.warning("mention_search_failed", query=search_query, error=str(e))
             vector_context = await vector_task
         else:
+            line = _step_event("Loading vector context", "Qdrant similarity search" if not skip_vector else "Skipped")
+            if line:
+                yield line
             status = "Looking through your conversation history...\n\n"
             yield status
             full_response.append(status)
@@ -309,6 +462,9 @@ async def chat_stream(conversation_id: str, user_message: str):
 
         # When we have search results, format and stream directly (guarantees article links)
         if url_results and (search_query or company):
+            line = _step_event("Formatting search results", f"Topic: {search_query or company}")
+            if line:
+                yield line
             topic = search_query or company
             formatted = _format_articles_with_links(url_results, topic)
             for c in formatted:
@@ -320,6 +476,9 @@ async def chat_stream(conversation_id: str, user_message: str):
                 yield c
                 full_response.append(c)
         else:
+            line = _step_event("Streaming LLM response", "Perplexity web search" if use_perplexity else "OpenRouter")
+            if line:
+                yield line
             gateway = LLMGateway()
             try:
                 got_llm_response = False

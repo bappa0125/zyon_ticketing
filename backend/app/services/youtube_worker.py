@@ -56,7 +56,7 @@ async def run_youtube_monitor() -> dict[str, int]:
                     continue
 
             count_today = await coll.count_documents(
-                {"entity": entity, "timestamp": {"$gte": start_of_day}}
+                {"entity": entity, "published_at": {"$gte": start_of_day}}
             )
             if count_today >= max_per_entity_per_day:
                 skipped += 1
@@ -69,7 +69,7 @@ async def run_youtube_monitor() -> dict[str, int]:
                 "url": (post.get("url") or "")[:500],
                 "content_hash": content_hash,
                 "engagement": post.get("engagement", {}),
-                "timestamp": ts,
+                "published_at": ts,
             }
             await coll.insert_one(doc)
             inserted += 1

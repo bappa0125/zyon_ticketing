@@ -51,23 +51,6 @@ services:
       - qdrant
     restart: unless-stopped
 
-  media_index_worker:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    environment:
-      - APP_ENV=dev
-      - MONGODB_URL=mongodb://mongodb:27017
-      - REDIS_URL=redis://redis:6379/0
-      - QDRANT_URL=http://qdrant:6333
-      - HF_TOKEN=${HF_TOKEN:-}
-    command: ["python", "scripts/media_index_scheduler.py"]
-    depends_on:
-      - mongodb
-      - redis
-      - qdrant
-    restart: unless-stopped
-
   crawler_worker:
     build:
       context: .

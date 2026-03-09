@@ -62,7 +62,7 @@ async def run_social_monitor() -> dict[str, int]:
             start_of_day = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
             count_today = await coll.count_documents({
                 "entity": entity,
-                "timestamp": {"$gte": start_of_day},
+                "published_at": {"$gte": start_of_day},
             })
             if count_today >= max_per_entity_per_day:
                 skipped += 1
@@ -75,7 +75,7 @@ async def run_social_monitor() -> dict[str, int]:
                 "url": (post.get("url") or "")[:500],
                 "content_hash": content_hash,
                 "engagement": post.get("engagement", {}),
-                "timestamp": ts_bson,
+                "published_at": ts_bson,
             }
             await coll.insert_one(doc)
             inserted += 1

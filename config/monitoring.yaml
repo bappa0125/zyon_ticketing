@@ -25,12 +25,11 @@ monitoring:
     enabled: true
     actor: "streamers/youtube-scraper"
     max_items_per_run: 10
+  # Apify social (Twitter/YouTube) disabled — not configured for now
   social_sources:
-    twitter: true
-    youtube: true
+    twitter: false
+    youtube: false
   apify:
-    twitter_actor: apify/twitter-search-scraper
-    youtube_actor: apify/youtube-comment-scraper
     max_items_per_run: 20
   social_data:
     retention_days: 30

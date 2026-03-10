@@ -51,12 +51,23 @@ def _get_entity_config(entity: str) -> dict[str, Any] | None:
 
 
 def get_context_keywords(entity: str) -> list[str]:
-    """Return context_keywords for entity from clients.yaml, or empty list."""
-    cfg = _get_entity_config(entity)
-    if not cfg:
+    """Return context_keywords for entity from clients.yaml, or empty list.
+    Only applies to the primary client name (e.g. Sahi); for competitors (Zerodha, Groww)
+    we return [] so we don't over-filter their mentions by the parent client's keywords.
+    """
+    entity = (entity or "").strip()
+    if not entity:
         return []
-    kw = cfg.get("context_keywords") or []
-    return [k.strip() for k in kw if k and isinstance(k, str)] if isinstance(kw, list) else []
+    entity_lower = entity.lower()
+    for c in _load_clients():
+        name = (c.get("name") or "").strip().lower()
+        if name and entity_lower == name:
+            kw = c.get("context_keywords") or []
+            return [k.strip() for k in kw if k and isinstance(k, str)] if isinstance(kw, list) else []
+        for comp in c.get("competitors") or []:
+            if (comp or "").strip().lower() == entity_lower:
+                return []
+    return []
 
 
 def get_disambiguated_search_query(entity: str) -> str:
@@ -68,6 +79,40 @@ def get_disambiguated_search_query(entity: str) -> str:
     if not keywords:
         return entity
     return f"{entity} {keywords[0]}"
+
+
+def resolve_to_canonical_entity(query: str) -> str | None:
+    """
+    Map a search query to the canonical entity name from clients.yaml.
+    Handles phrases like 'latest news on Sahi' -> 'Sahi', 'sahi trading app' -> 'Sahi'.
+    Returns None if no client/alias/competitor matches.
+    """
+    q = (query or "").strip()
+    if not q:
+        return None
+    q_lower = q.lower()
+    # Build (pattern, canonical) — patterns from name, aliases, competitors; sort by length desc
+    candidates: list[tuple[str, str]] = []
+    for c in _load_clients():
+        name = (c.get("name") or "").strip()
+        if not name:
+            continue
+        canonical = name
+        aliases = [a.strip().lower() for a in (c.get("aliases") or []) if a and isinstance(a, str)]
+        for a in [name.lower()] + aliases:
+            if a and len(a) >= 2:
+                candidates.append((a, canonical))
+        for comp in c.get("competitors") or []:
+            comp = (comp or "").strip()
+            if comp:
+                candidates.append((comp.lower(), comp))
+    candidates.sort(key=lambda x: -len(x[0]))
+    for pattern, canonical in candidates:
+        if pattern in q_lower:
+            # Word boundary for short patterns to reduce false positives (e.g. 'sahi' in 'Angela Sahi')
+            if len(pattern) >= 6 or re.search(r"\b" + re.escape(pattern) + r"\b", q_lower):
+                return canonical
+    return None
 
 
 def validate_mention_context(entity: str, article_text: str) -> bool:

@@ -2,9 +2,12 @@
 Media mention search - combines all monitoring sources via mention_retrieval_service,
 plus live article discovery (Google News RSS, Tavily/DuckDuckGo) when fewer than 10.
 Deduplicates, validates, quality scores, optionally reranks.
+Ranking: source weight (from media_sources.yaml) + recency + forum visibility boost.
+Validated live-search results can be stored in article_documents (background) for future DB-first retrieval.
 """
 import re
-from datetime import datetime
+import threading
+from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from typing import Optional
 from urllib.parse import urlparse
@@ -19,16 +22,72 @@ from app.services.media_mention.trusted_sources import is_trusted as is_trusted_
 
 logger = get_logger(__name__)
 
+# Forum visibility boost so discussions surface when news coverage is scarce
+FORUM_SCORE_BOOST = 15
+
 MAX_CANDIDATES = 10
-MAX_VALIDATED = 5
+MAX_VALIDATED = 20
 MIN_MENTIONS = 10
 MAX_CONCURRENT = 2
 TIMEOUT = 5
 VALIDATION_CHARS = 1500
 MIN_SCORE = 50
-TOP_RESULTS = 5
+TOP_RESULTS = 25
 LLM_MAX_TOKENS = 200
 TITLE_SIMILARITY_THRESHOLD = 0.85
+
+# Store validated live-search articles in article_documents for future DB-first retrieval (background, capped)
+STORE_LIVE_CAP = 10
+
+_SOURCE_WEIGHTS_CACHE: Optional[dict[str, int]] = None
+
+
+def _load_source_weights() -> dict[str, int]:
+    """Load domain -> weight from config/media_sources.yaml. Normalized domain (lower, no www)."""
+    global _SOURCE_WEIGHTS_CACHE
+    if _SOURCE_WEIGHTS_CACHE is not None:
+        return _SOURCE_WEIGHTS_CACHE
+    weights: dict[str, int] = {}
+    try:
+        from app.services.monitoring_ingestion.media_source_registry import load_media_sources
+        for s in load_media_sources():
+            domain = (s.get("domain") or "").strip().lower()
+            if not domain:
+                continue
+            if domain.startswith("www."):
+                domain = domain[4:]
+            w = s.get("weight")
+            if w is not None and isinstance(w, (int, float)):
+                weights[domain] = int(w)
+    except Exception as e:
+        logger.debug("mention_search_source_weights_load_failed", error=str(e))
+    _SOURCE_WEIGHTS_CACHE = weights
+    return weights
+
+
+def _domain_for_ranking(r: dict) -> str:
+    """Normalized domain from result (source or source_domain or url)."""
+    raw = (r.get("source") or r.get("source_domain") or "").strip()
+    if not raw and r.get("url"):
+        raw = urlparse(r.get("url", "")).netloc or ""
+    raw = raw.lower()
+    if raw.startswith("www."):
+        raw = raw[4:]
+    return raw.split(":")[0] if raw else ""
+
+
+def _ranking_score(r: dict, source_weights: dict[str, int]) -> float:
+    """score = source_weight*10 + recency_score; + FORUM_SCORE_BOOST when type==forum."""
+    ts = _to_sortable_ts(r)
+    now_ts = datetime.now(timezone.utc).timestamp()
+    article_age_hours = max(0.0, (now_ts - ts) / 3600.0) if ts else 100.0
+    recency_score = max(0.0, 100.0 - article_age_hours)
+    domain = _domain_for_ranking(r)
+    weight = source_weights.get(domain, 0)
+    score = weight * 10 + recency_score
+    if (r.get("type") or "").strip().lower() == "forum":
+        score += FORUM_SCORE_BOOST
+    return score
 
 
 def _strip_html(text: str, max_len: int = 500) -> str:
@@ -45,7 +104,10 @@ def _strip_html(text: str, max_len: int = 500) -> str:
         return s[:max_len]
 
 
-def _resolve_google_news_url(url: str, timeout: float = 4.0) -> str:
+RESOLVE_GOOGLE_NEWS_TIMEOUT = 8.0
+
+
+def _resolve_google_news_url(url: str, timeout: float = RESOLVE_GOOGLE_NEWS_TIMEOUT) -> str:
     """Resolve Google News redirect URL to final article URL. Returns original on failure."""
     if not url or "news.google.com" not in url:
         return url or ""
@@ -57,6 +119,13 @@ def _resolve_google_news_url(url: str, timeout: float = 4.0) -> str:
     except Exception as e:
         logger.debug("resolve_google_news_url_failed", url=url[:80], error=str(e))
         return url
+
+
+def _resolve_link_for_response(link: str) -> str:
+    """If link is a Google News redirect, resolve to final URL; otherwise return as-is."""
+    if not link or "news.google.com" not in link:
+        return link or ""
+    return _resolve_google_news_url(link, timeout=RESOLVE_GOOGLE_NEWS_TIMEOUT)
 
 
 def _fetch_article_text(url: str, max_chars: int = VALIDATION_CHARS) -> tuple[str, bool]:
@@ -227,7 +296,7 @@ def _format_date(pub) -> str:
     return str(pub)[:20]
 
 
-def _search_google_news_rss(company: str, max_results: int = 5) -> list[dict]:
+def _search_google_news_rss(company: str, max_results: int = 20) -> list[dict]:
     """Fetch Google News RSS for company."""
     results = []
     try:
@@ -240,7 +309,7 @@ def _search_google_news_rss(company: str, max_results: int = 5) -> list[dict]:
             if not link:
                 continue
             if "news.google.com" in link:
-                link = _resolve_google_news_url(link)
+                link = _resolve_google_news_url(link, timeout=RESOLVE_GOOGLE_NEWS_TIMEOUT)
             raw_summary = (e.get("summary") or "") if hasattr(e, "summary") else ""
             snippet = _strip_html(raw_summary, 300)
             pub = e.get("published_parsed") or e.get("updated_parsed") or e.get("published")
@@ -392,12 +461,109 @@ def _retrieval_to_mention(r: dict) -> dict:
     }
 
 
+def _store_validated_live_results(results: list[dict], company: str, cap: int = STORE_LIVE_CAP) -> None:
+    """
+    Background helper: fetch full article, run entity detection + context validation,
+    store in article_documents if validated and entity matches. Dedup by url_hash/content_hash.
+    Runs in a daemon thread; never raises to caller.
+    """
+    if not results or not (company or "").strip():
+        return
+    to_process = results[:cap]
+    try:
+        from pymongo import MongoClient
+
+        from app.services.monitoring_ingestion.article_fetcher import (
+            _content_hash,
+            _fetch_and_extract,
+            _normalize_url,
+            _source_domain_from_url,
+            _url_hash,
+        )
+        from app.services.entity_detection_service import detect_entity
+        from app.services.mention_context_validation import resolve_to_canonical_entity, validate_mention_context
+
+        cfg = get_config()
+        settings = cfg.get("settings")
+        mongodb_url = getattr(settings, "mongodb_url", "") if settings else ""
+        db_name = (cfg.get("mongodb") or {}).get("database", "chat")
+        if not mongodb_url:
+            logger.debug("store_live_results_skip", reason="no_mongodb_url")
+            return
+        client = MongoClient(mongodb_url)
+        db = client[db_name]
+        article_coll = db["article_documents"]
+
+        company_canonical = (resolve_to_canonical_entity(company) or company or "").strip()
+        stored = 0
+        for r in to_process:
+            try:
+                raw_url = (r.get("link") or r.get("url") or "").strip()
+                if not raw_url or "news.google.com" in raw_url:
+                    url = _resolve_google_news_url(raw_url, timeout=RESOLVE_GOOGLE_NEWS_TIMEOUT) if raw_url else ""
+                else:
+                    url = raw_url
+                if not url or "news.google.com" in url:
+                    continue
+                article_text, article_length, url_original, url_resolved = _fetch_and_extract(url)
+                if not article_text or not article_text.strip():
+                    continue
+                title = (r.get("title") or "").strip()[:1000]
+                detection_text = f"{title} {article_text[:8000]}".strip()
+                entity = detect_entity(detection_text)
+                if not entity:
+                    continue
+                if not validate_mention_context(entity, article_text):
+                    continue
+                entity_canonical = (resolve_to_canonical_entity(entity) or entity or "").strip()
+                if entity_canonical and company_canonical and entity_canonical.lower() != company_canonical.lower():
+                    continue
+                url_hash = _url_hash(url_resolved)
+                normalized_url = _normalize_url(url_resolved)[:2000]
+                content_hash = _content_hash(title, url_resolved)
+                if article_coll.find_one({"url_hash": url_hash}) or article_coll.find_one({"content_hash": content_hash}):
+                    continue
+                source_domain = _source_domain_from_url(url_resolved) or (r.get("source") or "")[:200]
+                fetched_at = datetime.now(timezone.utc)
+                doc = {
+                    "url": url_resolved[:2000],
+                    "url_original": url_original[:2000],
+                    "url_resolved": url_resolved[:2000],
+                    "normalized_url": normalized_url,
+                    "url_hash": url_hash,
+                    "content_hash": content_hash,
+                    "source_domain": (source_domain or "")[:200],
+                    "title": title or "Untitled",
+                    "published_at": fetched_at,
+                    "article_text": article_text[:500000],
+                    "article_length": article_length,
+                    "fetched_at": fetched_at,
+                    "entities": [entity_canonical or entity],
+                    "summary": (r.get("snippet") or r.get("summary") or "")[:5000],
+                }
+                article_coll.insert_one(doc)
+                stored += 1
+                logger.info("store_live_result_inserted", company=company, url=url_resolved[:80], entity=entity)
+            except Exception as e:
+                err_str = str(e).lower()
+                if "duplicate" in err_str or "e11000" in err_str:
+                    pass
+                else:
+                    logger.warning("store_live_result_failed", url=(r.get("link") or r.get("url") or "")[:80], error=str(e))
+        if stored:
+            logger.info("store_live_results_done", company=company, stored=stored, attempted=len(to_process))
+    except Exception as e:
+        logger.warning("store_live_results_error", company=company, error=str(e))
+
+
 def search_mentions(
     company: str,
     use_internal: bool = True,
     use_google_news: bool = True,
     use_external: bool = True,
     llm_rerank: bool = True,
+    store_live_results: bool = True,
+    forum_only: bool = False,
 ) -> list[dict]:
     """
     Always run MongoDB search first. If MongoDB returns any results, use them and do not run live search.
@@ -407,34 +573,43 @@ def search_mentions(
     all_results: list[dict] = []
     seen_urls: set[str] = set()
     mongodb_had_results = False
+    live_search_ran = False
 
     # 1. Always try MongoDB first (entity_mentions, article_documents, media_articles, social_posts)
     try:
-        from app.services.mention_retrieval_service import retrieve_mentions_db_first
-        db_first = retrieve_mentions_db_first(company, limit=10)
+        from app.services.mention_retrieval_service import retrieve_mentions_db_first, DB_FIRST_LIMIT
+        db_first = retrieve_mentions_db_first(company, limit=DB_FIRST_LIMIT)
         if db_first:
             mongodb_had_results = True
             db_items = [
-                {"title": r.get("title"), "snippet": r.get("summary"), "summary": r.get("summary"), "url": r.get("url"), "source_domain": r.get("source_domain"), "source": r.get("source"), "published_at": r.get("published_at"), "sentiment": r.get("sentiment"), "type": r.get("type", "article")}
+                {"title": r.get("title"), "snippet": r.get("summary"), "summary": r.get("summary"), "url": r.get("url"), "link": r.get("url"), "source_domain": r.get("source_domain"), "source": r.get("source"), "published_at": r.get("published_at"), "sentiment": r.get("sentiment"), "type": r.get("type", "article")}
                 for r in db_first
             ]
             filtered = _filter_by_context_keywords(db_items, company)
+            # Rank by source weight + recency + forum boost (same as live path)
+            source_weights = _load_source_weights()
+            for r in filtered:
+                r["score"] = int(_ranking_score(r, source_weights))
+            filtered.sort(key=lambda x: -x.get("score", 0))
             logger.info("mention_search_db_first_used", company=company, count=len(filtered))
-            return [
-                {
+            result = []
+            for r in filtered:
+                resolved = _resolve_link_for_response(r.get("url", "") or "")
+                if resolved and "news.google.com" in resolved:
+                    continue
+                result.append({
                     "title": r.get("title", ""),
-                    "link": r.get("url", ""),
-                    "url": r.get("url", ""),
+                    "link": resolved,
+                    "url": resolved,
                     "source": r.get("source_domain", r.get("source", "")),
-                    "score": 80,
+                    "score": r.get("score", 0),
                     "publish_date": r.get("published_at", ""),
                     "snippet": r.get("summary", ""),
                     "summary": r.get("summary", ""),
                     "sentiment": r.get("sentiment"),
                     "type": r.get("type", "article"),
-                }
-                for r in filtered
-            ]
+                })
+            return result
     except Exception as e:
         logger.debug("mention_search_db_first_skip", company=company, error=str(e))
 
@@ -456,6 +631,7 @@ def search_mentions(
     # 3. Only when MongoDB gave no results: run live search (internal, Google News, external)
     search_query = _get_disambiguated_search_query(company)
     if not mongodb_had_results and not all_results:
+        live_search_ran = True
         if use_internal:
             for r in _fetch_more_articles(search_query, company):
                 url = (r.get("url") or r.get("link", "")).strip().lower()
@@ -463,7 +639,7 @@ def search_mentions(
                     seen_urls.add(url)
                     all_results.append(r)
         if not all_results and use_google_news:
-            for r in _search_google_news_rss(search_query, max_results=5):
+            for r in _search_google_news_rss(search_query, max_results=20):
                 link = r.get("link", "")
                 url = link.strip().lower() if link else ""
                 if url and url not in seen_urls:
@@ -521,14 +697,11 @@ def search_mentions(
 
     combined = social + articles
 
-    # 7. Sort: social first, then articles; within each group by recency (newest first), then score
-    def sort_key(x):
-        ts = _to_sortable_ts(x)
-        if x.get("type") != "article":
-            return (0, -ts)
-        return (1, -ts, -x.get("score", 0))
-
-    combined.sort(key=sort_key)
+    # 7. Rank by source weight + recency (+ forum boost); sort by score descending
+    source_weights = _load_source_weights()
+    for r in combined:
+        r["score"] = int(_ranking_score(r, source_weights))
+    combined.sort(key=lambda x: -x.get("score", 0))
     top = combined[:max(MIN_MENTIONS, TOP_RESULTS)]
 
     if llm_rerank and len([r for r in top if r.get("type") == "article"]) > 1:
@@ -537,11 +710,17 @@ def search_mentions(
         reranked = _llm_rerank(art, company)
         top = soc + reranked[:TOP_RESULTS]
 
-    return [
-        {
+    out = []
+    for r in top:
+        raw_link = r.get("link", r.get("url", "")) or ""
+        resolved_link = _resolve_link_for_response(raw_link)
+        # Never surface Google News redirect URLs; only include results with real publisher URLs
+        if resolved_link and "news.google.com" in resolved_link:
+            continue
+        out.append({
             "title": r.get("title", ""),
-            "link": r.get("link", r.get("url", "")),
-            "url": r.get("link", r.get("url", "")),
+            "link": resolved_link,
+            "url": resolved_link,
             "source": r.get("source", "") or r.get("source_domain", ""),
             "score": r.get("score", 0),
             "publish_date": _format_date(r.get("publish_date") or r.get("timestamp")),
@@ -549,6 +728,16 @@ def search_mentions(
             "summary": (r.get("summary", "") or r.get("snippet", "") or "")[:400],
             "sentiment": r.get("sentiment"),
             "type": r.get("type", "article"),
-        }
-        for r in top
-    ]
+        })
+
+    # 8. Optionally store validated live results in article_documents (background) for future DB-first retrieval
+    if store_live_results and not forum_only and live_search_ran and out:
+        thread = threading.Thread(
+            target=_store_validated_live_results,
+            args=(out, company, STORE_LIVE_CAP),
+            daemon=True,
+            name="store_live_mentions",
+        )
+        thread.start()
+
+    return out

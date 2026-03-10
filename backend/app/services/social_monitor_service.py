@@ -106,10 +106,11 @@ async def fetch_social_mentions() -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
 
     if sources.get("twitter"):
-        actor_id = apify_cfg.get("twitter_actor", "apify/twitter-search-scraper")
+        actor_id = apify_cfg.get("twitter_actor", "scraper-engine/twitter-x-scraper")
+        # scraper-engine/twitter-x-scraper uses startUrls (URLs, usernames, or search keywords) and maxTweets
         input_data = {
-            "searchQueries": [query],
-            "maxItems": min(max_items, 20),
+            "startUrls": [query],
+            "maxTweets": min(max_items, 100),
         }
         items = run_actor(actor_id, input_data)
         for item in items:
@@ -119,8 +120,8 @@ async def fetch_social_mentions() -> list[dict[str, Any]]:
         results = results[:max_items]
 
     if sources.get("youtube") and len(results) < max_items:
-        actor_id = apify_cfg.get("youtube_actor", "apify/youtube-comment-scraper")
-        # YouTube comment scraper typically needs videoUrls; use search if supported
+        actor_id = apify_cfg.get("youtube_actor", "streamers/youtube-scraper")
+        # streamers/youtube-scraper: adjust input if schema differs (e.g. searchQuery, maxResults)
         input_data = {"searchKeywords": query, "maxItems": min(max_items - len(results), 20)}
         items = run_actor(actor_id, input_data)
         for item in items:

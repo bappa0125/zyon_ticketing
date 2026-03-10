@@ -278,3 +278,21 @@ Collect YouTube mentions via Apify actor apify/youtube-scraper.
 
 **Description:**  
 Build combined OR query; call Apify youtube-scraper; entity_detection; guardrails pipeline; store in social_posts. APIFY_API_KEY.
+
+---
+
+## Feature 7.4 — Entity Resolution for Search Queries
+
+**Status:** Implemented
+
+**Purpose:**  
+Map natural-language queries (e.g. "latest news on Sahi") to canonical entity names before mention search, so disambiguation and context filtering work correctly.
+
+**Files involved:**
+
+- `backend/app/services/mention_context_validation.py` — `resolve_to_canonical_entity(query)`
+- `backend/app/api/chat.py` — Resolve before `search_mentions`, pass canonical entity
+- `docs/features/entity_resolution_search.md`
+
+**Description:**  
+Uses `clients.yaml` (name, aliases, competitors) to resolve queries to canonical entity. Enables correct disambiguation (e.g. "Sahi trading") and context filtering for ambiguous entities.

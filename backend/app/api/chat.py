@@ -50,6 +50,25 @@ _TYPE_LABELS = {
     "social": "Social",
 }
 
+# Types considered "forum or social" for filter-only requests
+_FORUM_SOCIAL_TYPES = frozenset(("forum", "reddit", "youtube", "twitter"))
+
+
+def _is_forum_or_social_only_request(message: str) -> bool:
+    """True if the user asks to see only forum or social mentions (e.g. 'show only forum or social mentions of X')."""
+    if not message or not isinstance(message, str):
+        return False
+    lower = message.strip().lower()
+    return (
+        "only forum" in lower
+        or "only social" in lower
+        or "forum or social" in lower
+        or "forum and social" in lower
+        or "forums and social" in lower
+        or "just forum" in lower
+        or "just social" in lower
+    )
+
 
 def _format_mention_date(val) -> str:
     """Format publish_date/timestamp to 'Mar 5, 2026' style."""
@@ -99,15 +118,15 @@ def _format_articles_with_links(results: list[dict], topic: str) -> str:
     if not results:
         return f"No mentions found for **{topic}**."
     lines = [f"Here are the latest mentions for **{topic}**:\n"]
-    for i, r in enumerate(results[:10], 1):
+    for i, r in enumerate(results[:25], 1):
         try:
             title = str(r.get("title") or "Untitled")[:200]
             link = r.get("link") or r.get("url") or ""
             link = str(link)[:500] if link else ""
             if link and "news.google.com" in link:
                 try:
-                    from app.services.media_mention.mention_search import _resolve_google_news_url
-                    resolved = _resolve_google_news_url(link, timeout=2.0)
+                    from app.services.media_mention.mention_search import _resolve_google_news_url, RESOLVE_GOOGLE_NEWS_TIMEOUT
+                    resolved = _resolve_google_news_url(link, timeout=RESOLVE_GOOGLE_NEWS_TIMEOUT)
                     if resolved and "news.google.com" not in resolved:
                         link = resolved
                 except Exception:
@@ -335,6 +354,14 @@ async def chat_stream(conversation_id: str, user_message: str):
         if company and not search_query:
             search_query = company
 
+        # Resolve to canonical entity for search (e.g. "latest news on Sahi" -> "Sahi")
+        try:
+            from app.services.mention_context_validation import resolve_to_canonical_entity
+            resolved_entity = resolve_to_canonical_entity(search_query or company or "")
+            mention_entity = resolved_entity if resolved_entity else (search_query or company)
+        except Exception:
+            mention_entity = search_query or company
+
         # Out of scope: not greeting, not recall, not follow-up, and not article/mention search
         # -> immediately show suggested prompts, no search, no LLM
         if (
@@ -360,10 +387,11 @@ async def chat_stream(conversation_id: str, user_message: str):
             return
 
         # Gate: only run search when intent is search (or follow-up with company from context)
-        search_gated = (intent == "search" and company) or (intent == "chat" and is_follow_up_request(user_message) and company)
-        use_web_search = search_gated and (search_query is not None) and (company is not None)
+        search_gated = (intent == "search" and (company or mention_entity)) or (intent == "chat" and is_follow_up_request(user_message) and (company or mention_entity))
+        use_web_search = search_gated and (search_query is not None or mention_entity is not None) and (company is not None or mention_entity is not None)
         url_results = None
         is_follow_up = company and is_follow_up_request(user_message)
+        forum_only = _is_forum_or_social_only_request(user_message)
         skip_vector = len(user_message.strip()) < 25
         if is_recall_questions_request(user_message):
             line = _step_event("Recall questions", "Loading history and retrieving your questions")
@@ -376,8 +404,8 @@ async def chat_stream(conversation_id: str, user_message: str):
             status2 = "Retrieving your questions...\n\n"
             yield status2
             full_response.append(status2)
-        elif use_web_search and search_query:
-            line = _step_event("Search gated", f"Query: {search_query}, company: {company}")
+        elif use_web_search and (search_query or mention_entity):
+            line = _step_event("Search gated", f"Query: {search_query or mention_entity}, company: {company or mention_entity}")
             if line:
                 yield line
             status1 = "Looking through your conversation history...\n\n"
@@ -387,13 +415,18 @@ async def chat_stream(conversation_id: str, user_message: str):
             line = _step_event("Searching mentions", "RSS, articles, Reddit, YouTube, Twitter")
             if line:
                 yield line
-            status2 = f"Searching RSS feeds, articles, Reddit, YouTube, and Twitter for **{search_query}**...\n\n"
+            status2 = f"Searching RSS feeds, articles, Reddit, YouTube, and Twitter for **{search_query or mention_entity}**...\n\n"
             yield status2
             full_response.append(status2)
             try:
                 from app.services.media_mention.mention_search import search_mentions
                 url_results = await asyncio.wait_for(
-                    asyncio.to_thread(search_mentions, search_query, llm_rerank=not is_follow_up),
+                    asyncio.to_thread(
+                        search_mentions,
+                        mention_entity or search_query,
+                        llm_rerank=not is_follow_up,
+                        forum_only=forum_only,
+                    ),
                     timeout=25.0,
                 )
                 if url_results:
@@ -415,17 +448,17 @@ async def chat_stream(conversation_id: str, user_message: str):
                     line = _step_event("Mention search complete", f"Found {len(url_results)} results")
                     if line:
                         yield line
-                    logger.info("chat_mention_search_used", query=search_query, count=len(url_results))
+                    logger.info("chat_mention_search_used", query=mention_entity or search_query, count=len(url_results))
             except asyncio.TimeoutError:
                 line = _step_event("Mention search", "Timeout")
                 if line:
                     yield line
-                logger.warning("mention_search_timeout", query=search_query)
+                logger.warning("mention_search_timeout", query=mention_entity or search_query)
             except Exception as e:
                 line = _step_event("Mention search", f"Error: {str(e)[:80]}")
                 if line:
                     yield line
-                logger.warning("mention_search_failed", query=search_query, error=str(e))
+                logger.warning("mention_search_failed", query=mention_entity or search_query, error=str(e))
             vector_context = await vector_task
         else:
             line = _step_event("Loading vector context", "Qdrant similarity search" if not skip_vector else "Skipped")
@@ -438,7 +471,8 @@ async def chat_stream(conversation_id: str, user_message: str):
             preliminary = "Thinking...\n\n"
             yield preliminary
             full_response.append(preliminary)
-        use_perplexity = use_web_search and not url_results
+        # Never fall back to open-web search for "forum/social only" queries; we answer from our monitored sources only
+        use_perplexity = use_web_search and not url_results and not forum_only
         last_user_questions = None
         if is_recall_questions_request(user_message):
             user_msgs = [m["content"] for m in last_messages if m.get("role") == "user" and m.get("content") != user_message]
@@ -460,22 +494,69 @@ async def chat_stream(conversation_id: str, user_message: str):
         from app.config import get_config
         settings = get_config()["settings"]
 
-        # When we have search results, format and stream directly (guarantees article links)
-        if url_results and (search_query or company):
-            line = _step_event("Formatting search results", f"Topic: {search_query or company}")
+        # When user asked for "forum or social only", filter to those types; if none, say so and skip LLM
+        topic = search_query or company
+        display_results = list(url_results) if url_results else []
+        if forum_only and (search_query or company):
+            display_results = [
+                r for r in display_results
+                if (str(r.get("type") or "").strip().lower() in _FORUM_SOCIAL_TYPES)
+            ]
+            if not display_results:
+                line = _step_event("Forum/social only", "No forum or social mentions found")
+                if line:
+                    yield line
+                header = (
+                    "**Source**: Monitored forums and social only (no news articles).\n\n"
+                )
+                no_msg = f"No forum or social mentions found for **{topic}** in our monitored sources."
+                footer = (
+                    "\n\n---\n\n"
+                    "You can try:\n"
+                    f"- **Where was {topic} mentioned?** (all sources: news, forums, social)\n"
+                    f"- **Show recent news about {topic}.**\n"
+                )
+                for c in header + no_msg + footer:
+                    yield c
+                    full_response.append(c)
+                display_results = None  # mark that we streamed a direct response
+
+        streamed_direct = False
+        # When we have search results to show, format and stream directly (guarantees article links)
+        if display_results and (search_query or company):
+            line = _step_event("Formatting search results", f"Topic: {topic}")
             if line:
                 yield line
-            topic = search_query or company
-            formatted = _format_articles_with_links(url_results, topic)
-            for c in formatted:
+            formatted = _format_articles_with_links(display_results, topic)
+            header = (
+                f"**Source**: Monitored mentions from your configured news, blogs, forums, and social sources "
+                f"(not full open‑web search) for **{topic}**.\n\n"
+            )
+            if forum_only:
+                header = (
+                    f"**Source**: Forum and social mentions only for **{topic}**.\n\n"
+                )
+            footer = (
+                "\n\n---\n\n"
+                "You can also ask:\n"
+                f"- **Where was {topic} mentioned last week?**\n"
+                f"- **Compare mentions of {topic} vs a competitor.**\n"
+                f"- **Show only forum or social mentions of {topic}.**\n"
+            )
+            full_block = header + formatted + footer
+            for c in full_block:
                 yield c
                 full_response.append(c)
-        elif getattr(settings, "mock_llm", False):
+            streamed_direct = True
+        elif display_results is None:
+            streamed_direct = True  # we already streamed "no forum/social" message
+
+        if not streamed_direct and getattr(settings, "mock_llm", False):
             mock = f"[MOCK - OpenRouter skipped] Hi! You said: \"{user_message}\". The rest of the pipeline (streaming, MongoDB, nginx) is working."
             for c in mock:
                 yield c
                 full_response.append(c)
-        else:
+        elif not streamed_direct:
             line = _step_event("Streaming LLM response", "Perplexity web search" if use_perplexity else "OpenRouter")
             if line:
                 yield line

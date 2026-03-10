@@ -17,7 +17,7 @@ A prompt summarizing the features developed to date and the full architectural s
 | **Document DB** | MongoDB 7 | `conversations`, `messages`, `media_articles`, `mention_alerts` |
 | **Cache** | Redis 7 | Rate limiting, session cache |
 | **Search** | Google News RSS, Tavily, DuckDuckGo | Live web/news search, article discovery |
-| **Workers** | media_index_worker, crawler_worker | Background jobs for media ingestion and page crawling |
+| **Workers** | crawler_worker | Page crawling; media ingestion (RSS, article fetcher, entity mentions) runs via scheduler in backend |
 | **Deployment** | Docker Compose | All services containerized, volumes for persistence |
 
 ---
@@ -73,9 +73,9 @@ A prompt summarizing the features developed to date and the full architectural s
 - Health: `/health`, `/health/ready`
 - Metrics: `/metrics` (Prometheus)
 
-### 8. Media Index & Crawler Workers
-- media_index_worker: RSS/feed ingestion, article parsing, entity detection
-- crawler_worker: Playwright page snapshots, change detection
+### 8. Media Ingestion & Crawler Workers
+- **Backend scheduler** (ingestion_scheduler): RSS ingestion, article fetcher, entity mentions pipeline
+- **crawler_worker**: Playwright page snapshots, change detection
 - Monitored entities: Sahi, Zerodha, Upstox (configurable)
 
 ---

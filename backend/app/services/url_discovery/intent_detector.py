@@ -134,7 +134,7 @@ TRIGGER_PATTERNS = [
     r"\b(where|find|identify|get)\s+.*\s+(was|were)?\s*mentioned\b",
     r"\b(give\s+me|show\s+me|list|find)\s+.*\s+(websites?|urls?|links?|sites?|mentions?|articles?)\b",
     r"\b\d+\s+(websites?|urls?|sites?|articles?)\s+where\b",
-    r"\b(recent|latest|most\s+recent)\s+(mentions?|articles?|news|coverage)\b",
+    r"\b(recent|latest|most\s+recent)\s+(mentions?|articles?|news|new|coverage)\b",
     r"\b(latest|recent)\s+results?\s+(on|about)\b",
     r"\bgive\s+me\s+(the\s+)?(latest|recent)\s+results?\s+(on|about)\b",
     r"\bfind\s+.*\s+(mentions?|articles?|coverage)\b",
@@ -143,7 +143,7 @@ TRIGGER_PATTERNS = [
 ]
 
 # Simpler: message has a domain (X.com) or entity + any of these words
-TRIGGER_WORDS = {"mention", "mentions", "mentioned", "article", "articles", "news", "website", "websites", "url", "urls", "link", "links", "coverage", "find", "search", "recent", "latest", "result", "results"}
+TRIGGER_WORDS = {"mention", "mentions", "mentioned", "article", "articles", "news", "new", "website", "websites", "url", "urls", "link", "links", "coverage", "find", "search", "recent", "latest", "result", "results"}
 
 
 def extract_company_or_topic(message: str) -> str | None:
@@ -280,9 +280,9 @@ def _extract_entity(message: str) -> str:
         if len(entity) > 2 and len(entity) < 100:
             return entity
 
-    # "latest news on X" / "news on X" / "articles on X"
+    # "latest news on X" / "news on X" / "articles on X" / "latest new on X" (typo-friendly)
     on_match = re.search(
-        r'\b(?:latest|recent|top\s+)?(?:news|articles?|mentions?)\s+on\s+([^.?!]+?)(?:\s+and\s+|\s+with\s+|\s*$|\.)',
+        r'\b(?:latest|recent|top\s+)?(?:news|new|articles?|mentions?)\s+(?:on|of)\s+([^.?!]+?)(?:\s+and\s+|\s+with\s+|\s*$|\.)',
         message,
         re.I,
     )

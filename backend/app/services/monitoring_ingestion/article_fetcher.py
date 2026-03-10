@@ -50,6 +50,19 @@ def _content_hash(normalized_title: str, resolved_url: str) -> str:
     return hashlib.md5((title + url).encode("utf-8")).hexdigest()
 
 
+def _source_domain_from_url(url: str) -> str:
+    """Extract source_domain from URL. Never return news.google.com."""
+    if not url or not isinstance(url, str):
+        return ""
+    parsed = urlparse((url or "").strip())
+    netloc = (parsed.netloc or "").split(":")[0].lower()
+    if not netloc or netloc == "news.google.com":
+        return ""
+    if netloc.startswith("www."):
+        netloc = netloc[4:]
+    return netloc[:200]
+
+
 def _fetch_and_extract(url: str) -> tuple[str | None, int, str, str]:
     """Fetch URL (follow redirects), extract article text. Returns (text, length, url_original, url_resolved)."""
     url_original = (url or "").strip()[:2000]
@@ -111,48 +124,51 @@ async def run_article_fetcher(max_items: int = MAX_BATCH) -> dict[str, Any]:
             await rss_coll.update_one({"_id": item["_id"]}, {"$set": {"status": STATUS_FAILED}})
             failures += 1
             continue
-        url_hash = _url_hash(url)
-        normalized_url = _normalize_url(url)
+        article_text, article_length, url_original, url_resolved = _fetch_and_extract(url)
+        if article_text is None:
+            await rss_coll.update_one({"_id": item["_id"]}, {"$set": {"status": STATUS_FAILED}})
+            failures += 1
+            continue
+        # Deduplication and storage use resolved URL (real article URL, not Google News redirect)
+        url_hash = _url_hash(url_resolved)
+        normalized_url = _normalize_url(url_resolved)[:2000]
+        content_hash = _content_hash((item.get("title") or ""), url_resolved)
         existing = await article_coll.find_one({"url_hash": url_hash})
         if existing:
             await rss_coll.update_one({"_id": item["_id"]}, {"$set": {"status": STATUS_PROCESSED}})
             duplicates_skipped += 1
             continue
-        article_text, article_length, url_original, url_resolved = _fetch_and_extract(url)
-        content_hash = _content_hash((item.get("title") or ""), url_resolved)
         existing_by_content = await article_coll.find_one({"content_hash": content_hash})
         if existing_by_content:
             await rss_coll.update_one({"_id": item["_id"]}, {"$set": {"status": STATUS_PROCESSED}})
             duplicates_skipped += 1
-            continue
-        if article_text is None:
-            await rss_coll.update_one({"_id": item["_id"]}, {"$set": {"status": STATUS_FAILED}})
-            failures += 1
             continue
         fetched_at = datetime.now(timezone.utc)
         title_raw = (item.get("title") or "")[:1000]
         entities: list[str] = []
         try:
             from app.services.entity_detection_service import detect_entity
-            detected = detect_entity(f"{title_raw} {article_text[:2000]}")
+            detected = detect_entity(f"{title_raw} {article_text[:8000]}")
             if detected:
                 entities = [detected]
         except Exception:
             pass
+        source_domain = _source_domain_from_url(url_resolved) or (item.get("source_domain") or "")[:200]
         doc = {
             "url": url_resolved[:2000],
             "url_original": url_original[:2000],
             "url_resolved": url_resolved[:2000],
-            "normalized_url": _normalize_url(url_resolved)[:2000],
+            "normalized_url": normalized_url,
             "url_hash": url_hash,
             "content_hash": content_hash,
-            "source_domain": (item.get("source_domain") or "")[:200],
+            "source_domain": source_domain[:200] if source_domain else "",
             "title": title_raw,
             "published_at": item.get("published_at"),
             "article_text": article_text[:500000],
             "article_length": article_length,
             "fetched_at": fetched_at,
             "entities": entities,
+            "summary": (item.get("summary") or "").strip()[:5000],
         }
         try:
             await article_coll.insert_one(doc)

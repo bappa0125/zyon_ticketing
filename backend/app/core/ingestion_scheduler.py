@@ -82,6 +82,18 @@ def _job_crawler_enqueue():
         logger.exception("scheduler_job_failed", job="crawler_enqueue", error=str(e))
 
 
+def _job_forum_ingestion():
+    """Scheduled job: Forum ingestion (HTML sources) into article_documents."""
+    from app.services.forum_ingestion_worker import run_forum_ingestion
+
+    logger.info("scheduler_job_start", job="forum_ingestion")
+    try:
+        result = asyncio.run(run_forum_ingestion())
+        logger.info("scheduler_job_complete", job="forum_ingestion", result=result)
+    except Exception as e:
+        logger.exception("scheduler_job_failed", job="forum_ingestion", error=str(e))
+
+
 def start_scheduler():
     """Start the ingestion scheduler if enabled in config."""
     global _scheduler
@@ -98,6 +110,7 @@ def start_scheduler():
     reddit_min = sched_cfg.get("reddit_interval_minutes", 120)
     youtube_min = sched_cfg.get("youtube_interval_minutes", 120)
     crawler_min = sched_cfg.get("crawler_enqueue_interval_minutes", 30)
+    forum_min = sched_cfg.get("forum_ingestion_interval_minutes", 360)
 
     _scheduler = BackgroundScheduler(daemon=True)
     _scheduler.add_job(_job_rss, "interval", hours=rss_hours, id="rss_ingestion")
@@ -106,6 +119,7 @@ def start_scheduler():
     _scheduler.add_job(_job_reddit, "interval", minutes=reddit_min, id="reddit_monitor")
     _scheduler.add_job(_job_youtube, "interval", minutes=youtube_min, id="youtube_monitor")
     _scheduler.add_job(_job_crawler_enqueue, "interval", minutes=crawler_min, id="crawler_enqueue")
+    _scheduler.add_job(_job_forum_ingestion, "interval", minutes=forum_min, id="forum_ingestion")
 
     _scheduler.start()
     logger.info(
@@ -116,6 +130,7 @@ def start_scheduler():
         reddit_interval_minutes=reddit_min,
         youtube_interval_minutes=youtube_min,
         crawler_enqueue_interval_minutes=crawler_min,
+        forum_ingestion_interval_minutes=forum_min,
     )
 
 

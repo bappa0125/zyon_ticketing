@@ -55,6 +55,8 @@ def _extract_entries(feed_url: str, source_domain: str, rss_feed: str) -> list[d
             continue
         title = (getattr(entry, "title", None) or "").strip() or "(No title)"
         published_at = _parse_published(entry)
+        summary_raw = getattr(entry, "summary", None) or getattr(entry, "description", None)
+        summary = (summary_raw or "").strip()[:5000] if summary_raw else ""
         items.append({
             "title": title[:1000],
             "url": url[:2000],
@@ -63,6 +65,7 @@ def _extract_entries(feed_url: str, source_domain: str, rss_feed: str) -> list[d
             "discovered_at": discovered_at,
             "rss_feed": rss_feed[:500],
             "status": DEFAULT_STATUS,
+            "summary": summary,
         })
     return items
 

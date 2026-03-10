@@ -11,6 +11,7 @@ scheduler:
   reddit_interval_minutes: 120
   youtube_interval_minutes: 120
   crawler_enqueue_interval_minutes: 30
+  forum_ingestion_interval_minutes: 360
 
 # Step stream disabled in production (enable only for debugging)
 chat:

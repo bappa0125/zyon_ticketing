@@ -67,8 +67,6 @@ def get_config() -> dict[str, Any]:
         "llm": base.get("llm", {}),
         "qdrant_optimization": base.get("qdrant_optimization", {}),
         "url_discovery": base.get("url_discovery", {}),
-        "media_index": base.get("media_index", {}),
-        "media_ingestion": base.get("media_ingestion", {}),
         "media_mention": base.get("media_mention", {}),
         "monitoring": load_monitoring_yaml().get("monitoring", {}),
         "chat": base.get("chat", {}),

@@ -234,7 +234,7 @@ These modules are not assigned to a feature in FEATURE_REGISTRY.md. Treat them a
 | `backend/app/api/chat.py` | Chat + streaming; uses mention search, LLM, Qdrant, MongoDB |
 | `backend/app/api/history.py` | Conversation history (MongoDB) |
 | `backend/app/api/coverage.py` | Alternative coverage/alert API; uses media_intelligence.alerts |
-| `backend/app/api/media_search.py` | Media search; uses media_index.article_search |
+| `backend/app/api/media_search.py` | Media search; uses media_article_search (MongoDB) |
 | `backend/app/api/url_search.py` | URL discovery; uses url_discovery.url_agent |
 | `backend/app/api/crawler.py` | Crawler API; uses crawler services |
 | `backend/app/api/system_metrics.py` | System metrics (Prometheus-style) |
@@ -253,8 +253,8 @@ These modules are not assigned to a feature in FEATURE_REGISTRY.md. Treat them a
 | `backend/app/services/redis_client.py` | Redis client; cache/session |
 | `backend/app/services/mongodb.py` | MongoDB connection; used by most features |
 | `backend/app/services/url_discovery/*` | URL discovery (Tavily, DuckDuckGo, intent, cache, parser) |
-| `backend/app/services/media_index/*` | Article index, search, crawler, scheduler |
-| `backend/app/services/media_ingestion/*` | RSS crawler, ingestion scheduler, article storage, entity detector |
+| `backend/app/services/monitoring_ingestion/*` | RSS ingestion, article fetcher, media source registry |
+| `backend/app/services/media_article_search.py` | MongoDB search over media_articles |
 | `backend/app/services/media_intelligence/*` | Alerts, sentiment (intelligence layer) |
 | `backend/app/services/crawler/*` | Crawler jobs, snapshot store, scheduler, change detector, rules |
 

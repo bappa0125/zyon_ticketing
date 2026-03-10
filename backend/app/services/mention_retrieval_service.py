@@ -12,7 +12,7 @@ ARTICLE_DOCUMENTS_COLLECTION = "article_documents"
 MEDIA_COLLECTION = "media_articles"
 SOCIAL_COLLECTION = "social_posts"
 MIN_MENTIONS = 10
-DB_FIRST_LIMIT = 10
+DB_FIRST_LIMIT = 25
 
 
 def _get_db_sync():

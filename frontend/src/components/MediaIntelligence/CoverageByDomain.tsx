@@ -11,6 +11,8 @@ interface CoverageByDomainProps {
   byDomain: DomainRow[];
   entities: string[];
   clientName: string;
+  /** Competitor names to show as columns (instead of a single "Others" column). */
+  competitors?: string[];
   loading?: boolean;
   onSelectDomain?: (domain: string | null) => void;
   selectedDomain?: string | null;
@@ -20,6 +22,7 @@ export function CoverageByDomain({
   byDomain,
   entities,
   clientName,
+  competitors = [],
   loading,
   onSelectDomain,
   selectedDomain,
@@ -41,6 +44,8 @@ export function CoverageByDomain({
     );
   }
 
+  const showCompetitorColumns = competitors.length > 0;
+
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-4">
       <h3 className="text-sm font-medium text-zinc-300 mb-3">Coverage by source</h3>
@@ -52,13 +57,20 @@ export function CoverageByDomain({
               <th className="text-left py-2 pr-2 text-zinc-400 font-medium">Source</th>
               <th className="text-right py-2 px-1 text-zinc-400 font-medium">Total</th>
               <th className="text-right py-2 px-1 text-zinc-400 font-medium">{clientName}</th>
-              <th className="text-right py-2 pl-1 text-zinc-400 font-medium">Others</th>
+              {showCompetitorColumns
+                ? competitors.map((comp) => (
+                    <th key={comp} className="text-right py-2 px-1 text-zinc-400 font-medium">
+                      {comp}
+                    </th>
+                  ))
+                : (
+                  <th className="text-right py-2 pl-1 text-zinc-400 font-medium">Others</th>
+                )}
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-800">
             {byDomain.map((row) => {
               const clientCount = row.entities[clientName] ?? 0;
-              const othersCount = row.total - clientCount;
               const isSelected = selectedDomain === row.domain;
               return (
                 <tr
@@ -71,7 +83,17 @@ export function CoverageByDomain({
                   </td>
                   <td className="text-right py-1.5 px-1 text-zinc-400">{row.total}</td>
                   <td className="text-right py-1.5 px-1 text-emerald-400">{clientCount}</td>
-                  <td className="text-right py-1.5 pl-1 text-zinc-400">{othersCount}</td>
+                  {showCompetitorColumns
+                    ? competitors.map((comp) => (
+                        <td key={comp} className="text-right py-1.5 px-1 text-zinc-400">
+                          {row.entities[comp] ?? 0}
+                        </td>
+                      ))
+                    : (
+                      <td className="text-right py-1.5 pl-1 text-zinc-400">
+                        {row.total - clientCount}
+                      </td>
+                    )}
                 </tr>
               );
             })}

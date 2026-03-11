@@ -216,6 +216,7 @@ export default function MediaIntelligencePage() {
                   byDomain={data?.by_domain ?? []}
                   entities={entities}
                   clientName={data?.client ?? ""}
+                  competitors={data?.competitors ?? []}
                   loading={loading}
                   onSelectDomain={(d) => setSelectedDomain(d)}
                   selectedDomain={selectedDomain}

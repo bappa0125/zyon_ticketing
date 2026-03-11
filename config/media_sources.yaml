@@ -455,3 +455,12 @@ sources:
     crawl_frequency: 360
     priority: 3
     weight: 5
+  - domain: reddit.com
+    name: Reddit Indian Street Bets
+    category: forum
+    region: india
+    crawl_method: rss
+    rss_feed: https://www.reddit.com/r/IndianStreetBets/.rss
+    crawl_frequency: 180
+    priority: 2
+    weight: 6

@@ -93,6 +93,7 @@ def retrieve_mentions_db_first(entity: str, limit: int = DB_FIRST_LIMIT) -> list
                         "summary": str(doc.get("summary") or doc.get("snippet") or "")[:500],
                         "sentiment": doc.get("sentiment"),
                         "url": str(doc.get("url") or "")[:500],
+                        "url_note": str(doc.get("url_note") or "")[:500],
                         "type": str(doc.get("type") or "article")[:50],
                         "_sort": _published_at_for_sort(doc),
                     })
@@ -115,6 +116,7 @@ def retrieve_mentions_db_first(entity: str, limit: int = DB_FIRST_LIMIT) -> list
                         "summary": summary,
                         "sentiment": doc.get("sentiment"),
                         "url": str(doc.get("url") or doc.get("url_resolved") or "")[:500],
+                        "url_note": str(doc.get("url_note") or "")[:500],
                         "type": "article",
                         "_sort": _published_at_for_sort(doc),
                     })
@@ -166,13 +168,14 @@ def retrieve_mentions_db_first(entity: str, limit: int = DB_FIRST_LIMIT) -> list
         logger.warning("mention_retrieval_db_first_failed", entity=entity, error=str(e))
         return []
 
-    # Dedupe by url, sort by published_at desc, limit
-    seen_urls: set[str] = set()
+    # Dedupe by url (or by title+source_domain for metadata-only rows with empty url), sort by published_at desc, limit
+    seen_keys: set[str] = set()
     unique: list[dict] = []
     for r in sorted(results, key=lambda x: x.get("_sort", datetime.min), reverse=True):
         url = (r.get("url") or "").strip().lower()
-        if url and url not in seen_urls:
-            seen_urls.add(url)
+        dedup_key = url if url else ("meta:" + (r.get("title") or "") + "|" + (r.get("source_domain") or ""))
+        if dedup_key not in seen_keys:
+            seen_keys.add(dedup_key)
             r2 = {k: v for k, v in r.items() if k != "_sort"}
             unique.append(r2)
             if len(unique) >= limit:

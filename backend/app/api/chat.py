@@ -22,6 +22,7 @@ Use the conversation context provided when relevant."""
 class ChatRequest(BaseModel):
     conversation_id: str
     message: str
+    live_search: bool = False  # When True, run only live web search (user clicked "Search the web"); expect 30–40s, possible duplicates
 
 
 # Step log prefix for temporary debug stream (config: chat.debug_step_stream)
@@ -123,14 +124,8 @@ def _format_articles_with_links(results: list[dict], topic: str) -> str:
             title = str(r.get("title") or "Untitled")[:200]
             link = r.get("link") or r.get("url") or ""
             link = str(link)[:500] if link else ""
-            if link and "news.google.com" in link:
-                try:
-                    from app.services.media_mention.mention_search import _resolve_google_news_url, RESOLVE_GOOGLE_NEWS_TIMEOUT
-                    resolved = _resolve_google_news_url(link, timeout=RESOLVE_GOOGLE_NEWS_TIMEOUT)
-                    if resolved and "news.google.com" not in resolved:
-                        link = resolved
-                except Exception:
-                    pass
+            # Live search may omit URL when redirect resolution/content fetch fails. Preserve recall with a clear note.
+            url_note = str(r.get("url_note") or "").strip()
             link_display = _url_display(link)
             source_raw = str(r.get("source") or r.get("source_domain") or "").strip()[:100]
             # Capitalize platforms for display: reddit -> Reddit, youtube -> YouTube
@@ -175,6 +170,8 @@ def _format_articles_with_links(results: list[dict], topic: str) -> str:
             if link:
                 # Short display text; full URL in link so click goes to article
                 lines.append(f"[{link_display or link[:50] + '…'}]({link})" if len(link) > 60 else link)
+            elif url_note:
+                lines.append(url_note)
             else:
                 lines.append("—")
             lines.append("")
@@ -254,8 +251,10 @@ def build_messages(
     return messages
 
 
-async def chat_stream(conversation_id: str, user_message: str):
-    """Stream chat response. Uses intent classifier to gate search; OpenRouter :online for search intent."""
+async def chat_stream(conversation_id: str, user_message: str, live_search: bool = False):
+    """Stream chat response. Uses intent classifier to gate search; OpenRouter :online for search intent.
+    When live_search=True, only run web search (user clicked 'Search the web'); show 30–40s disclaimer and results.
+    """
     import asyncio
     from app.services.intent_classifier import classify_intent
     from app.services.url_discovery.intent_detector import (
@@ -390,6 +389,7 @@ async def chat_stream(conversation_id: str, user_message: str):
         search_gated = (intent == "search" and (company or mention_entity)) or (intent == "chat" and is_follow_up_request(user_message) and (company or mention_entity))
         use_web_search = search_gated and (search_query is not None or mention_entity is not None) and (company is not None or mention_entity is not None)
         url_results = None
+        search_results_streamed_inline = False  # True when DB+live flow streams results directly
         is_follow_up = company and is_follow_up_request(user_message)
         forum_only = _is_forum_or_social_only_request(user_message)
         skip_vector = len(user_message.strip()) < 25
@@ -412,29 +412,46 @@ async def chat_stream(conversation_id: str, user_message: str):
             yield status1
             full_response.append(status1)
             vector_task = asyncio.create_task(asyncio.to_thread(qdrant.search_similar, conversation_id, user_message, 5))
-            line = _step_event("Searching mentions", "RSS, articles, Reddit, YouTube, Twitter")
+            line = _step_event("Searching mentions", "DB + live search (RSS, articles, Reddit, YouTube, Twitter)")
             if line:
                 yield line
             status2 = f"Searching RSS feeds, articles, Reddit, YouTube, and Twitter for **{search_query or mention_entity}**...\n\n"
             yield status2
             full_response.append(status2)
+
+            topic = search_query or company
+            db_results: list[dict] = []
+            live_results: list[dict] = []
             try:
-                from app.services.media_mention.mention_search import search_mentions
-                url_results = await asyncio.wait_for(
-                    asyncio.to_thread(
-                        search_mentions,
-                        mention_entity or search_query,
-                        llm_rerank=not is_follow_up,
-                        forum_only=forum_only,
-                    ),
-                    timeout=25.0,
-                )
-                if url_results:
-                    url_results = [
+                from app.services.media_mention.mention_search import search_mentions_db_only, search_mentions_live_only
+
+                if live_search:
+                    # User clicked "Search the web" — run live search only (DB was already shown). Set expectations.
+                    disclaimer = (
+                        "Web search may take **30–40 seconds**. Results may include duplicates, but this ensures you don't miss anything.\n\n"
+                    )
+                    for c in disclaimer:
+                        yield c
+                        full_response.append(c)
+                    yield "\n[LIVE_SEARCH_PENDING]\n"
+                    full_response.append("\n[LIVE_SEARCH_PENDING]\n")
+                    exclude_urls: set[str] = set()
+                    live_results = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            search_mentions_live_only,
+                            mention_entity or search_query,
+                            exclude_urls=exclude_urls,
+                            llm_rerank=not is_follow_up,
+                            forum_only=forum_only,
+                        ),
+                        timeout=45.0,
+                    )
+                    live_results = [
                         {
                             "title": r.get("title", ""),
                             "link": r.get("link", r.get("url", "")),
                             "url": r.get("link", r.get("url", "")),
+                            "url_note": r.get("url_note", ""),
                             "source": r.get("source") or r.get("source_domain", ""),
                             "score": r.get("score"),
                             "publish_date": r.get("publish_date", r.get("timestamp", "")),
@@ -443,22 +460,121 @@ async def chat_stream(conversation_id: str, user_message: str):
                             "sentiment": r.get("sentiment"),
                             "type": r.get("type", "article"),
                         }
-                        for r in url_results
+                        for r in live_results
                     ]
-                    line = _step_event("Mention search complete", f"Found {len(url_results)} results")
-                    if line:
-                        yield line
-                    logger.info("chat_mention_search_used", query=mention_entity or search_query, count=len(url_results))
+                    yield "\n[LIVE_SEARCH_DONE]\n"
+                    full_response.append("\n[LIVE_SEARCH_DONE]\n")
+                    if forum_only and topic:
+                        live_display = [r for r in live_results if (str(r.get("type") or "").strip().lower() in _FORUM_SOCIAL_TYPES)]
+                    else:
+                        live_display = list(live_results)
+                    if live_display:
+                        live_header = "\n\n**Latest from web search:**\n\n"
+                        for c in live_header:
+                            yield c
+                            full_response.append(c)
+                        live_formatted = _format_articles_with_links(live_display, topic)
+                        for c in live_formatted:
+                            yield c
+                            full_response.append(c)
+                    else:
+                        for c in "\n\n**Latest from web search:**\n\nNo additional new results — we already have all the latest mentions in our database.\n":
+                            yield c
+                            full_response.append(c)
+                    url_results = live_results
+                else:
+                    # Default: DB only first; show results and offer optional live search via button
+                    db_results = search_mentions_db_only(mention_entity or search_query, forum_only=forum_only)
+                    db_results = [
+                        {
+                            "title": r.get("title", ""),
+                            "link": r.get("link", r.get("url", "")),
+                            "url": r.get("link", r.get("url", "")),
+                            "url_note": r.get("url_note", ""),
+                            "source": r.get("source") or r.get("source_domain", ""),
+                            "score": r.get("score"),
+                            "publish_date": r.get("publish_date", r.get("timestamp", "")),
+                            "snippet": r.get("snippet", r.get("summary", "")),
+                            "summary": r.get("summary", r.get("snippet", "")),
+                            "sentiment": r.get("sentiment"),
+                            "type": r.get("type", "article"),
+                        }
+                        for r in db_results
+                    ]
+                    if forum_only and topic:
+                        db_display = [r for r in db_results if (str(r.get("type") or "").strip().lower() in _FORUM_SOCIAL_TYPES)]
+                    else:
+                        db_display = list(db_results)
+                    if db_display:
+                        db_header = (
+                            f"**Source**: Monitored mentions from your configured news, blogs, forums, and social sources for **{topic}**.\n\n"
+                            "**From our database** (may be a few hours old):\n\n"
+                        )
+                        for c in db_header:
+                            yield c
+                            full_response.append(c)
+                        db_formatted = _format_articles_with_links(db_display, topic)
+                        for c in db_formatted:
+                            yield c
+                            full_response.append(c)
+                    # Signal frontend: show "Search the web" button (may take 30–40s; duplicates possible but ensures nothing missed)
+                    yield "\n[LIVE_SEARCH_AVAILABLE]\n"
+                    full_response.append("\n[LIVE_SEARCH_AVAILABLE]\n")
+                    url_results = db_results
+                    live_results = []
+
+                    url_results = db_results
+                    live_results = []
+
+                if forum_only and topic:
+                    if live_search:
+                        combined_display = [r for r in live_results if (str(r.get("type") or "").strip().lower() in _FORUM_SOCIAL_TYPES)]
+                    else:
+                        combined_display = [r for r in db_results if (str(r.get("type") or "").strip().lower() in _FORUM_SOCIAL_TYPES)]
+                else:
+                    combined_display = list(live_results) if live_search else list(db_results)
+                if forum_only and topic and not combined_display:
+                    no_msg = f"\n\nNo forum or social mentions found for **{topic}** in our monitored sources."
+                    for c in no_msg:
+                        yield c
+                        full_response.append(c)
+                elif not combined_display and not live_search:
+                    no_msg = f"\n\nNo mentions found for **{topic}** in our database. Use the button below to search the web."
+                    for c in no_msg:
+                        yield c
+                        full_response.append(c)
+                elif not combined_display and live_search:
+                    pass  # already streamed "No additional results"
+                footer = (
+                    "\n\n---\n\n"
+                    "You can also ask:\n"
+                    f"- **Where was {topic} mentioned last week?**\n"
+                    f"- **Compare mentions of {topic} vs a competitor.**\n"
+                    f"- **Show only forum or social mentions of {topic}.**\n"
+                )
+                for c in footer:
+                    yield c
+                    full_response.append(c)
+                logger.info("chat_mention_search_used", query=mention_entity or search_query, db_count=len(db_results), live_count=len(live_results), live_search_requested=live_search)
             except asyncio.TimeoutError:
-                line = _step_event("Mention search", "Timeout")
+                if live_search:
+                    yield "\n[LIVE_SEARCH_DONE]\n"
+                    full_response.append("\n[LIVE_SEARCH_DONE]\n")
+                line = _step_event("Mention search", "Live search timeout")
                 if line:
                     yield line
                 logger.warning("mention_search_timeout", query=mention_entity or search_query)
+                url_results = db_results if db_results else []
             except Exception as e:
+                if live_search:
+                    yield "\n[LIVE_SEARCH_DONE]\n"
+                    full_response.append("\n[LIVE_SEARCH_DONE]\n")
                 line = _step_event("Mention search", f"Error: {str(e)[:80]}")
                 if line:
                     yield line
                 logger.warning("mention_search_failed", query=mention_entity or search_query, error=str(e))
+                url_results = db_results if db_results else []
+            search_results_streamed_inline = True  # DB+live flow streams directly
             vector_context = await vector_task
         else:
             line = _step_event("Loading vector context", "Qdrant similarity search" if not skip_vector else "Skipped")
@@ -522,8 +638,10 @@ async def chat_stream(conversation_id: str, user_message: str):
                 display_results = None  # mark that we streamed a direct response
 
         streamed_direct = False
-        # When we have search results to show, format and stream directly (guarantees article links)
-        if display_results and (search_query or company):
+        # When we have search results to show, format and stream directly (unless already streamed by DB+live flow)
+        if search_results_streamed_inline:
+            streamed_direct = True  # DB+live flow already streamed results
+        elif display_results and (search_query or company):
             line = _step_event("Formatting search results", f"Topic: {topic}")
             if line:
                 yield line
@@ -605,7 +723,7 @@ async def chat(request: ChatRequest):
         raise HTTPException(status_code=400, detail="conversation_id and message required")
 
     return StreamingResponse(
-        chat_stream(request.conversation_id, request.message),
+        chat_stream(request.conversation_id, request.message, request.live_search),
         media_type="text/plain; charset=utf-8",
         headers={"X-Accel-Buffering": "no"},
     )

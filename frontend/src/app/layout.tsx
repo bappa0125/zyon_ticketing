@@ -32,6 +32,12 @@ export default function RootLayout({
             Media
           </Link>
           <Link
+            href="/media-intelligence"
+            className="text-sm text-zinc-400 hover:text-zinc-200"
+          >
+            Media Intelligence
+          </Link>
+          <Link
             href="/sentiment"
             className="text-sm text-zinc-400 hover:text-zinc-200"
           >

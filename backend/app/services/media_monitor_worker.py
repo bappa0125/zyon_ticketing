@@ -4,7 +4,7 @@ Uses media_monitor_service to search news, stores in MongoDB media_articles coll
 """
 from datetime import datetime
 
-from app.core.client_config_loader import load_clients
+from app.core.client_config_loader import get_entity_names, load_clients
 from app.core.logging import get_logger
 from app.services.media_monitor_service import (
     deduplicate_by_url,
@@ -37,9 +37,8 @@ async def run_media_monitor() -> dict:
     seen_urls: set[str] = set()
 
     for client_obj in clients:
-        client_name = client_obj.get("name", "")
-        competitors = client_obj.get("competitors", [])
-        entities = [client_name] + (competitors if isinstance(competitors, list) else [])
+        entities = get_entity_names(client_obj)
+        client_name = client_obj.get("name", "") if client_obj else ""
 
         for entity in entities:
             if not entity or not isinstance(entity, str):

@@ -135,8 +135,8 @@ TRIGGER_PATTERNS = [
     r"\b(give\s+me|show\s+me|list|find)\s+.*\s+(websites?|urls?|links?|sites?|mentions?|articles?)\b",
     r"\b\d+\s+(websites?|urls?|sites?|articles?)\s+where\b",
     r"\b(recent|latest|most\s+recent)\s+(mentions?|articles?|news|new|coverage)\b",
-    r"\b(latest|recent)\s+results?\s+(on|about)\b",
-    r"\bgive\s+me\s+(the\s+)?(latest|recent)\s+results?\s+(on|about)\b",
+    r"\b(latest|recent)\s+results?\s+(on|about|of|for)\b",
+    r"\bgive\s+me\s+(the\s+)?(latest|recent)\s+results?\s+(on|about|of|for)\b",
     r"\bfind\s+.*\s+(mentions?|articles?|coverage)\b",
     r"\bsearch\s+for\s+.*\s+(mentions?|articles?)\b",
     r"\bmost\s+recent\s+mentions?\b",
@@ -291,9 +291,9 @@ def _extract_entity(message: str) -> str:
         if len(entity) > 2 and len(entity) < 100:
             return entity
 
-    # "latest result on X" / "recent results about X"
+    # "latest result on X" / "recent results about X" / "latest result for X"
     result_match = re.search(
-        r'\b(?:latest|recent)\s+results?\s+(?:on|about)\s+([^.?!]+?)(?:\s+and\s+|\s+with\s+|\s*$|\.)',
+        r'\b(?:latest|recent)\s+results?\s+(?:on|about|of|for)\s+([^.?!]+?)(?:\s+and\s+|\s+with\s+|\s*$|\.)',
         message,
         re.I,
     )

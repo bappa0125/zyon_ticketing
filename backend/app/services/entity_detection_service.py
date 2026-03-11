@@ -75,17 +75,8 @@ def _load_clients_sync() -> list[dict[str, Any]]:
 
 
 def _build_entity_map() -> tuple[dict[str, list[str]], list[str], list[tuple[str, str]]]:
-    """Build entity -> aliases (lowercase), ignore patterns, and precompiled alias lookup from clients.yaml and monitoring."""
+    """Build entity -> aliases (lowercase), ignore patterns, and precompiled alias lookup from clients.yaml only."""
     clients = _load_clients_sync()
-
-    config = get_config()
-    mon = config.get("monitoring", {})
-    ed = mon.get("entity_detection", {})
-    global_aliases = ed.get("entity_aliases", {})
-    if isinstance(global_aliases, dict):
-        global_aliases = {k: v if isinstance(v, list) else [] for k, v in global_aliases.items()}
-    else:
-        global_aliases = {}
 
     entity_map: dict[str, list[str]] = {}
     entities_seen: set[str] = set()
@@ -101,24 +92,26 @@ def _build_entity_map() -> tuple[dict[str, list[str]], list[str], list[tuple[str
             if isinstance(aliases, list):
                 entity_map[name] = [str(a).strip().lower() for a in aliases if a]
             else:
-                alist = global_aliases.get(name)
-                entity_map[name] = [a.strip().lower() for a in (alist if isinstance(alist, list) else [name]) if a]
+                entity_map[name] = [name.lower()]
             if name.lower() not in entity_map[name]:
                 entity_map[name].insert(0, name.lower())
             entities_seen.add(name)
         for comp in c.get("competitors") or []:
-            if comp and isinstance(comp, str):
-                comp = comp.strip()
-                if comp and comp not in entities_seen:
-                    alist = global_aliases.get(comp)
-                    entity_map[comp] = [a.strip().lower() for a in (alist if isinstance(alist, list) else [comp]) if a]
-                    if comp.lower() not in entity_map[comp]:
-                        entity_map[comp].insert(0, comp.lower())
-                    entities_seen.add(comp)
+            comp_name = (comp.get("name") or "").strip() if isinstance(comp, dict) else (comp or "").strip() if isinstance(comp, str) else ""
+            if not comp_name:
+                continue
+            if comp_name not in entities_seen:
+                if isinstance(comp, dict) and isinstance(comp.get("aliases"), list):
+                    entity_map[comp_name] = [str(a).strip().lower() for a in comp["aliases"] if a]
+                else:
+                    entity_map[comp_name] = [comp_name.lower()]
+                if comp_name.lower() not in entity_map[comp_name]:
+                    entity_map[comp_name].insert(0, comp_name.lower())
+                entities_seen.add(comp_name)
+            for p in (comp.get("ignore_patterns") or []) if isinstance(comp, dict) else []:
+                if p and isinstance(p, str):
+                    ignore_set.add(p.strip().lower())
 
-    for p in ed.get("ignore_patterns") or []:
-        if p and isinstance(p, str):
-            ignore_set.add(p.strip().lower())
     ignore = sorted(ignore_set)
 
     # Precompiled alias lookup: (alias_lower, entity) sorted by alias length desc for longest match

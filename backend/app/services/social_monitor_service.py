@@ -2,7 +2,7 @@
 from datetime import datetime
 from typing import Any
 
-from app.core.client_config_loader import load_clients
+from app.core.client_config_loader import get_entity_names, load_clients
 from app.core.logging import get_logger
 from app.services.apify_service import run_actor
 
@@ -84,12 +84,7 @@ async def fetch_social_mentions() -> list[dict[str, Any]]:
     clients = await load_clients()
     entities: list[str] = []
     for c in clients:
-        name = (c.get("name") or "").strip()
-        if name:
-            entities.append(name)
-        for comp in c.get("competitors") or []:
-            if comp and isinstance(comp, str):
-                entities.append(comp.strip())
+        entities.extend(get_entity_names(c))
     entities = list(dict.fromkeys(e for e in entities if e))
 
     if not entities:

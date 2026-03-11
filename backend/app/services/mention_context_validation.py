@@ -6,7 +6,7 @@ Does not modify the entity detection pipeline.
 """
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Union
 
 import yaml
 
@@ -35,8 +35,17 @@ def _load_clients() -> list[dict[str, Any]]:
     return _clients_cache
 
 
+def _competitor_name(comp: Union[dict, str, None]) -> str:
+    """Canonical name for competitor (string or dict with 'name')."""
+    if comp is None:
+        return ""
+    if isinstance(comp, dict):
+        return (comp.get("name") or "").strip()
+    return (comp or "").strip() if isinstance(comp, str) else ""
+
+
 def _get_entity_config(entity: str) -> dict[str, Any] | None:
-    """Return client config block for this entity (name or competitor)."""
+    """Return config block for this entity: client dict, or for competitor a dict with ignore_patterns + context_keywords from client."""
     entity = (entity or "").strip()
     if not entity:
         return None
@@ -45,16 +54,19 @@ def _get_entity_config(entity: str) -> dict[str, Any] | None:
         if (c.get("name") or "").strip().lower() == entity_lower:
             return c
         for comp in c.get("competitors") or []:
-            if (comp or "").strip().lower() == entity_lower:
+            comp_name = _competitor_name(comp)
+            if comp_name.lower() == entity_lower:
+                if isinstance(comp, dict):
+                    return {
+                        "ignore_patterns": comp.get("ignore_patterns") or [],
+                        "context_keywords": c.get("context_keywords") or [],
+                    }
                 return c
     return None
 
 
 def get_context_keywords(entity: str) -> list[str]:
-    """Return context_keywords for entity from clients.yaml, or empty list.
-    Only applies to the primary client name (e.g. Sahi); for competitors (Zerodha, Groww)
-    we return [] so we don't over-filter their mentions by the parent client's keywords.
-    """
+    """Return context_keywords for entity from clients.yaml (shared for client and competitors)."""
     entity = (entity or "").strip()
     if not entity:
         return []
@@ -65,8 +77,9 @@ def get_context_keywords(entity: str) -> list[str]:
             kw = c.get("context_keywords") or []
             return [k.strip() for k in kw if k and isinstance(k, str)] if isinstance(kw, list) else []
         for comp in c.get("competitors") or []:
-            if (comp or "").strip().lower() == entity_lower:
-                return []
+            if _competitor_name(comp).lower() == entity_lower:
+                kw = c.get("context_keywords") or []
+                return [k.strip() for k in kw if k and isinstance(k, str)] if isinstance(kw, list) else []
     return []
 
 
@@ -103,9 +116,16 @@ def resolve_to_canonical_entity(query: str) -> str | None:
             if a and len(a) >= 2:
                 candidates.append((a, canonical))
         for comp in c.get("competitors") or []:
-            comp = (comp or "").strip()
-            if comp:
-                candidates.append((comp.lower(), comp))
+            comp_name = _competitor_name(comp)
+            if not comp_name:
+                continue
+            candidates.append((comp_name.lower(), comp_name))
+            if isinstance(comp, dict):
+                for a in (comp.get("aliases") or []):
+                    if a and isinstance(a, str):
+                        a = a.strip().lower()
+                        if len(a) >= 2:
+                            candidates.append((a, comp_name))
     candidates.sort(key=lambda x: -len(x[0]))
     for pattern, canonical in candidates:
         if pattern in q_lower:

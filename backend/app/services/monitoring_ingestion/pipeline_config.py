@@ -43,20 +43,16 @@ def _load_media_sources_for_pipeline() -> list[dict[str, Any]]:
 
 
 def _monitored_entities_from_clients(clients: list[dict]) -> list[str]:
-    """Derive monitored entity names (client names + competitors)."""
+    """Derive monitored entity names (client names + competitors). Supports competitors as string or dict with 'name'."""
+    from app.core.client_config_loader import get_entity_names
+
     entities: list[str] = []
     seen: set[str] = set()
     for c in clients:
-        name = (c.get("name") or "").strip()
-        if name and name not in seen:
-            entities.append(name)
-            seen.add(name)
-        for comp in c.get("competitors") or []:
-            if comp and isinstance(comp, str):
-                comp = comp.strip()
-                if comp and comp not in seen:
-                    entities.append(comp)
-                    seen.add(comp)
+        for name in get_entity_names(c):
+            if name and name not in seen:
+                entities.append(name)
+                seen.add(name)
     return entities
 
 

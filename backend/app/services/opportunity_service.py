@@ -1,7 +1,7 @@
 """PR opportunity detection — topics competitors dominate but client has no mentions."""
 from typing import Any
 
-from app.core.client_config_loader import load_clients
+from app.core.client_config_loader import get_competitor_names, load_clients
 from app.services.mongodb import get_mongo_client
 
 
@@ -23,10 +23,7 @@ async def detect_pr_opportunities(client: str) -> list[dict[str, Any]]:
         return []
 
     client_name = (client_obj.get("name") or "").strip()
-    competitors = client_obj.get("competitors", [])
-    if not isinstance(competitors, list):
-        competitors = []
-    competitor_list = [c.strip() for c in competitors if c and isinstance(c, str)]
+    competitor_list = get_competitor_names(client_obj)
 
     if not competitor_list:
         return []

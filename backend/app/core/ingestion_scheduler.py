@@ -35,12 +35,13 @@ def _job_article_fetcher():
 
 
 def _job_entity_mentions():
-    """Scheduled job: Entity mentions pipeline every N minutes."""
+    """Scheduled job: Entity mentions pipeline (unprocessed-first, batch 150)."""
     from app.services.entity_mentions_worker import run_entity_mentions_pipeline
 
     logger.info("scheduler_job_start", job="entity_mentions")
     try:
-        result = asyncio.run(run_entity_mentions_pipeline(batch_size=50))
+        batch = (get_config().get("scheduler") or {}).get("entity_mentions_batch_size", 150)
+        result = asyncio.run(run_entity_mentions_pipeline(batch_size=batch))
         logger.info("scheduler_job_complete", job="entity_mentions", result=result)
     except Exception as e:
         logger.exception("scheduler_job_failed", job="entity_mentions", error=str(e))
@@ -94,6 +95,30 @@ def _job_forum_ingestion():
         logger.exception("scheduler_job_failed", job="forum_ingestion", error=str(e))
 
 
+def _job_entity_mentions_sentiment():
+    """Scheduled job: Run VADER sentiment on entity_mentions where sentiment is missing."""
+    from app.services.entity_mentions_sentiment_worker import run_entity_mentions_sentiment
+
+    logger.info("scheduler_job_start", job="entity_mentions_sentiment")
+    try:
+        result = asyncio.run(run_entity_mentions_sentiment(batch_size=50))
+        logger.info("scheduler_job_complete", job="entity_mentions_sentiment", result=result)
+    except Exception as e:
+        logger.exception("scheduler_job_failed", job="entity_mentions_sentiment", error=str(e))
+
+
+def _job_ai_summary():
+    """Scheduled job: AI summaries for new entity_mentions and article_documents. Once/day to stay under free tier."""
+    from app.services.ai_summary_worker import run_ai_summary_worker
+
+    logger.info("scheduler_job_start", job="ai_summary")
+    try:
+        result = asyncio.run(run_ai_summary_worker())
+        logger.info("scheduler_job_complete", job="ai_summary", result=result)
+    except Exception as e:
+        logger.exception("scheduler_job_failed", job="ai_summary", error=str(e))
+
+
 def start_scheduler():
     """Start the ingestion scheduler if enabled in config."""
     global _scheduler
@@ -111,11 +136,15 @@ def start_scheduler():
     youtube_min = sched_cfg.get("youtube_interval_minutes", 120)
     crawler_min = sched_cfg.get("crawler_enqueue_interval_minutes", 30)
     forum_min = sched_cfg.get("forum_ingestion_interval_minutes", 360)
+    sentiment_min = sched_cfg.get("entity_mentions_sentiment_interval_minutes", 20)
+    ai_summary_hours = sched_cfg.get("ai_summary_interval_hours", 24)
 
     _scheduler = BackgroundScheduler(daemon=True)
     _scheduler.add_job(_job_rss, "interval", hours=rss_hours, id="rss_ingestion")
     _scheduler.add_job(_job_article_fetcher, "interval", minutes=article_min, id="article_fetcher")
     _scheduler.add_job(_job_entity_mentions, "interval", minutes=entity_min, id="entity_mentions")
+    _scheduler.add_job(_job_entity_mentions_sentiment, "interval", minutes=sentiment_min, id="entity_mentions_sentiment")
+    _scheduler.add_job(_job_ai_summary, "interval", hours=ai_summary_hours, id="ai_summary")
     _scheduler.add_job(_job_reddit, "interval", minutes=reddit_min, id="reddit_monitor")
     _scheduler.add_job(_job_youtube, "interval", minutes=youtube_min, id="youtube_monitor")
     _scheduler.add_job(_job_crawler_enqueue, "interval", minutes=crawler_min, id="crawler_enqueue")
@@ -131,6 +160,8 @@ def start_scheduler():
         youtube_interval_minutes=youtube_min,
         crawler_enqueue_interval_minutes=crawler_min,
         forum_ingestion_interval_minutes=forum_min,
+        entity_mentions_sentiment_interval_minutes=sentiment_min,
+        ai_summary_interval_hours=ai_summary_hours,
     )
 
 

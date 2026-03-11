@@ -65,12 +65,14 @@ async def get_dashboard(
     client: str,
     range_param: str = "7d",
     domain_filter: Optional[str] = None,
+    content_quality: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     Return full dashboard from article_documents + entity_mentions.
     client: primary company name (from clients.yaml).
     range_param: 24h | 7d | 30d.
     domain_filter: optional domain (e.g. moneycontrol.com) to filter feed and coverage to that source.
+    content_quality: optional filter for feed — "full_text" | "snippet" | None (all).
     """
     await get_mongo_client()
     from app.services.mongodb import get_db
@@ -127,9 +129,11 @@ async def get_dashboard(
                 "ai_summary": (doc.get("ai_summary") or "").strip() or None,
                 "sentiment": doc.get("sentiment"),
                 "url": (doc.get("url") or "").strip(),
+                "url_original": (doc.get("url_original") or "").strip(),
                 "url_note": (doc.get("url_note") or "").strip(),
                 "entity": (doc.get("entity") or "").strip(),
                 "id": str(doc.get("_id", "")),
+                "content_quality": doc.get("content_quality") or "full_text",
             })
     except Exception:
         pass
@@ -148,33 +152,37 @@ async def get_dashboard(
         async for doc in cursor:
             pub = doc.get("published_at") or doc.get("fetched_at")
             ents = doc.get("entities") or []
-            entity_val = ents[0] if ents else ""
-            for e in entities:
-                if e in ents:
-                    entity_val = e
-                    break
-            raw.append({
-                "_source": "article_documents",
-                "title": doc.get("title") or "Untitled",
-                "source": doc.get("source_domain") or doc.get("source") or "",
-                "published_at": pub,
-                "snippet": (doc.get("summary") or (doc.get("article_text") or "")[:400]).strip(),
-                "ai_summary": (doc.get("ai_summary") or "").strip() or None,
-                "sentiment": doc.get("sentiment"),
-                "url": (doc.get("url") or doc.get("url_resolved") or "").strip(),
-                "url_note": (doc.get("url_note") or "").strip(),
-                "entity": (entity_val or "").strip() if isinstance(entity_val, str) else "",
-                "id": str(doc.get("_id", "")),
-            })
+            # One raw item per (doc, entity) so multi-entity articles appear once per entity
+            for entity_val in ents:
+                if entity_val not in entities:
+                    continue
+                article_text = (doc.get("article_text") or "").strip()
+                content_quality = "snippet" if not article_text else "full_text"
+                raw.append({
+                    "_source": "article_documents",
+                    "title": doc.get("title") or "Untitled",
+                    "source": doc.get("source_domain") or doc.get("source") or "",
+                    "published_at": pub,
+                    "snippet": (doc.get("summary") or (article_text[:400] if article_text else "")).strip(),
+                    "ai_summary": (doc.get("ai_summary") or "").strip() or None,
+                    "sentiment": doc.get("sentiment"),
+                    "url": (doc.get("url") or doc.get("url_resolved") or "").strip(),
+                    "url_original": (doc.get("url_original") or "").strip(),
+                    "url_note": (doc.get("url_note") or "").strip(),
+                    "entity": (entity_val or "").strip() if isinstance(entity_val, str) else "",
+                    "id": f"{doc.get('_id', '')}_{entity_val or ''}",
+                    "content_quality": content_quality,
+                })
     except Exception:
         pass
 
-    # Dedupe by (url or title+source), sort by published_at desc; add normalized source_domain
+    # Dedupe by (url, entity) so same article can appear once per entity (multiple mentions)
     seen: set[str] = set()
     unified: list[dict[str, Any]] = []
     for r in sorted(raw, key=lambda x: _to_dt(x.get("published_at")) or datetime.min, reverse=True):
         url = (r.get("url") or "").strip().lower()
-        key = url if url else ("meta:" + (r.get("title") or "") + "|" + (r.get("source") or ""))
+        entity = (r.get("entity") or "").strip()
+        key = (f"{url}|{entity}" if url and entity else (url or ("meta:" + (r.get("title") or "") + "|" + (r.get("source") or ""))))
         if key in seen:
             continue
         seen.add(key)
@@ -223,6 +231,12 @@ async def get_dashboard(
         if domain_norm:
             unified = [r for r in unified if r.get("source_domain") == domain_norm]
 
+    # Optional filter by content_quality for feed (coverage/timeline stay full)
+    if content_quality in ("full_text", "snippet"):
+        unified_for_feed = [r for r in unified if (r.get("content_quality") or "full_text") == content_quality]
+    else:
+        unified_for_feed = unified
+
     # Build coverage (count by entity)
     coverage_map: dict[str, int] = {e: 0 for e in entities}
     for r in unified:
@@ -232,16 +246,27 @@ async def get_dashboard(
     coverage = [{"entity": e, "mentions": coverage_map[e]} for e in entities]
     coverage.sort(key=lambda x: -x["mentions"])
 
-    # Build feed items (include sentiment, summary = ai_summary or snippet, source_domain)
+    # Per-URL set of entities (for also_mentions)
+    url_entities: dict[str, set[str]] = {}
+    for r in unified_for_feed:
+        u = (r.get("url") or "").strip().lower()
+        e = (r.get("entity") or "").strip()
+        if u and e:
+            url_entities.setdefault(u, set()).add(e)
+
+    # Build feed items (include sentiment, summary, content_quality, also_mentions)
     feed: list[dict] = []
-    for r in unified:
+    for r in unified_for_feed:
         pub = r.get("published_at")
         pub_iso = pub.isoformat() if isinstance(pub, datetime) else str(pub or "")[:50]
         entity_val = r.get("entity") or ""
         mention_type = "direct" if entity_val.strip().lower() == client_name.lower() else "competitor"
         url = (r.get("url") or "").strip()
+        url_lower = url.lower()
         confidence = "verified" if url else "unverified"
         summary = (r.get("ai_summary") or "").strip() or (r.get("snippet") or "")[:400]
+        others = (url_entities.get(url_lower) or set()) - {entity_val}
+        also_mentions = sorted(others) if others else []
         feed.append({
             "id": r.get("id", ""),
             "publisher": (r.get("source") or "")[:200],
@@ -250,12 +275,16 @@ async def get_dashboard(
             "publish_time": pub_iso,
             "snippet": (r.get("snippet") or "")[:400],
             "summary": summary[:400],
+            "ai_summary": (r.get("ai_summary") or "").strip()[:400] or None,
             "sentiment": r.get("sentiment"),
             "mention_type": mention_type,
             "entity": entity_val,
             "confidence": confidence,
             "link": url,
+            "url_original": (r.get("url_original") or "").strip(),
             "url_note": r.get("url_note") or ("" if url else "Publisher link unavailable"),
+            "content_quality": r.get("content_quality") or "full_text",
+            "also_mentions": also_mentions,
         })
 
     # Timeline: by day per entity

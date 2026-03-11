@@ -8,12 +8,20 @@ export interface MediaMentionItem {
   publish_time: string;
   snippet: string;
   summary?: string;
+  /** AI-generated one-line summary (preferred when present) */
+  ai_summary?: string;
   sentiment?: string | null;
   mention_type: "direct" | "competitor";
   entity: string;
   confidence: "verified" | "unverified" | "snippet match";
   link: string;
+  /** Original URL from RSS when resolved link is missing or still a redirect (e.g. news.google.com) */
+  url_original?: string;
   url_note?: string;
+  /** full_text = full article read; snippet = title/summary only */
+  content_quality?: "full_text" | "snippet";
+  /** Other entities mentioned in the same article (enterprise: same URL, multiple mentions) */
+  also_mentions?: string[];
 }
 
 interface MediaMentionCardProps {
@@ -38,14 +46,24 @@ function formatTimeAgo(iso: string): string {
   }
 }
 
+function isUnresolvedRedirect(link: string): boolean {
+  return !link || /news\.google\.com/i.test(link);
+}
+
 export function MediaMentionCard({ item }: MediaMentionCardProps) {
-  const hasLink = !!item.link;
+  const resolvedLink = (item.link || "").trim();
+  const originalLink = (item.url_original || "").trim();
+  const displayLink = resolvedLink || originalLink;
+  const hasLink = !!displayLink;
+  const showMayRedirect = hasLink && isUnresolvedRedirect(resolvedLink);
   const confidenceLabel =
     item.confidence === "verified"
       ? "Verified"
       : item.confidence === "snippet match"
         ? "Snippet match"
         : "Unverified";
+  const isSnippetOnly = item.content_quality === "snippet";
+  const contentQualityLabel = isSnippetOnly ? "Snippet" : "Full article";
 
   return (
     <article className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4 hover:border-zinc-700 transition-colors">
@@ -69,11 +87,24 @@ export function MediaMentionCard({ item }: MediaMentionCardProps) {
         >
           {confidenceLabel}
         </span>
+        <span
+          className={`text-xs font-medium px-2 py-0.5 rounded ${
+            isSnippetOnly ? "bg-amber-500/20 text-amber-400" : "bg-sky-500/20 text-sky-400"
+          }`}
+          title={isSnippetOnly ? "Entity detected from title/summary only" : "Full article text was read"}
+        >
+          {contentQualityLabel}
+        </span>
       </div>
       <p className="text-sm font-medium text-zinc-200 mb-1 line-clamp-2">{item.headline}</p>
       <p className="text-xs text-zinc-500 mb-2">
         {item.publisher} · {formatTimeAgo(item.publish_time)}
       </p>
+      {item.also_mentions && item.also_mentions.length > 0 && (
+        <p className="text-xs text-zinc-500 mb-2">
+          Also mentions: {item.also_mentions.join(", ")}
+        </p>
+      )}
       {item.sentiment && (
         <span
           className={`text-xs px-2 py-0.5 rounded mr-2 ${
@@ -87,17 +118,19 @@ export function MediaMentionCard({ item }: MediaMentionCardProps) {
           {item.sentiment}
         </span>
       )}
-      {(item.summary || item.snippet) && (
-        <p className="text-sm text-zinc-400 mb-3 line-clamp-2">{item.summary || item.snippet}</p>
+      {(item.ai_summary || item.summary || item.snippet || item.headline) && (
+        <p className="text-sm text-zinc-400 mb-3 line-clamp-2">
+          {item.ai_summary || item.summary || item.snippet || item.headline}
+        </p>
       )}
       {hasLink ? (
         <a
-          href={item.link}
+          href={displayLink}
           target="_blank"
           rel="noopener noreferrer"
           className="text-sm text-zinc-300 hover:text-white hover:underline inline-flex items-center gap-1"
         >
-          Open Article →
+          {showMayRedirect ? "Open (may redirect) →" : "Open Article →"}
         </a>
       ) : (
         <span className="text-xs text-zinc-500">{item.url_note || "Publisher link unavailable"}</span>

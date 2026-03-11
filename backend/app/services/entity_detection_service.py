@@ -175,6 +175,19 @@ def _layer2_alias(text: str) -> Optional[str]:
     return None
 
 
+def _layer2_alias_all(text: str) -> list[str]:
+    """Layer 2: return all entities whose alias appears in text. Case-insensitive."""
+    _get_entity_map()
+    normalized = text.strip().lower()
+    if not normalized:
+        return []
+    found: set[str] = set()
+    for alias, entity in _alias_lookup:
+        if alias in normalized:
+            found.add(entity)
+    return list(found)
+
+
 def _layer3_regex(text: str) -> Optional[str]:
     """Layer 3: regex match for canonical entity names (broker/trading references)."""
     regex, to_canonical = _get_entity_regex()
@@ -185,6 +198,20 @@ def _layer3_regex(text: str) -> Optional[str]:
         return None
     key = m.group(1).lower()
     return to_canonical.get(key)
+
+
+def _layer3_regex_all(text: str) -> list[str]:
+    """Layer 3: return all entities matched by regex in text (finditer)."""
+    regex, to_canonical = _get_entity_regex()
+    if not regex or not text:
+        return []
+    found: set[str] = set()
+    for m in regex.finditer(text):
+        key = m.group(1).lower()
+        entity = to_canonical.get(key)
+        if entity:
+            found.add(entity)
+    return list(found)
 
 
 def _layer4_ner(text: str) -> Optional[str]:
@@ -225,6 +252,49 @@ def _layer4_ner(text: str) -> Optional[str]:
             if key in aliases:
                 return entity
     return None
+
+
+def _layer4_ner_all(text: str) -> list[str]:
+    """Layer 4: return all ORG entities from NER that match monitored list."""
+    entity_map, _ = _get_entity_map()
+    if not entity_map or not text or not text.strip():
+        return []
+    try:
+        import spacy
+    except ImportError:
+        return []
+    global _nlp
+    if _nlp is None:
+        try:
+            _nlp = spacy.load("en_core_web_sm")
+        except OSError:
+            try:
+                _nlp = spacy.load("en_core_web_sm", disable=["parser"])
+            except OSError:
+                logger.debug("entity_detection_ner_spacy_not_available")
+                return []
+    doc = _nlp(text[:100000])
+    to_canonical: dict[str, str] = {}
+    for entity, aliases in entity_map.items():
+        to_canonical[entity.lower()] = entity
+        for a in aliases:
+            if a:
+                to_canonical[a] = entity
+    found: set[str] = set()
+    for ent in doc.ents:
+        if ent.label_ != "ORG":
+            continue
+        key = ent.text.strip().lower()
+        if not key:
+            continue
+        if key in to_canonical:
+            found.add(to_canonical[key])
+        else:
+            for entity, aliases in entity_map.items():
+                if key in aliases:
+                    found.add(entity)
+                    break
+    return list(found)
 
 
 def _has_finance_context(text: str) -> bool:
@@ -322,6 +392,25 @@ def detect_entity(
     if with_metadata:
         return result
     return result.entity
+
+
+def detect_entities(text: str) -> list[str]:
+    """
+    Return all entities mentioned in text (alias + regex + NER). No LLM.
+    Same layers as detect_entity but collects every match. Deduped, stable order.
+    """
+    if not text or not isinstance(text, str):
+        return []
+    if _layer1_ignore(text):
+        return []
+    found: set[str] = set()
+    for entity in _layer2_alias_all(text):
+        found.add(entity)
+    for entity in _layer3_regex_all(text):
+        found.add(entity)
+    for entity in _layer4_ner_all(text):
+        found.add(entity)
+    return sorted(found)
 
 
 def _article_url_hash(article_url: str) -> str:

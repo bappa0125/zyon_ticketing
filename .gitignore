@@ -15,3 +15,7 @@ venv/
 !*.tfvars.example
 next/
 dist/
+
+# Local backup output (upload to Google Drive or elsewhere)
+data_backup/
+data_backup*.zip

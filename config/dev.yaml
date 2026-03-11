@@ -7,6 +7,11 @@ scheduler:
   rss_interval_hours: 4
   article_fetcher_interval_minutes: 10
   entity_mentions_interval_minutes: 15
+  entity_mentions_batch_size: 150  # Unprocessed-first; drain backlog without blocking
+  entity_mentions_sentiment_interval_minutes: 20  # VADER sentiment on new entity_mentions
+  # AI summaries: once/day, 25+25 batch to stay under OpenRouter free tier (~50 calls/day)
+  ai_summary_interval_hours: 24
+  ai_summary_batch_size: 25
   reddit_interval_minutes: 120
   youtube_interval_minutes: 120
   crawler_enqueue_interval_minutes: 30

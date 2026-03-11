@@ -1,5 +1,6 @@
 """AI Summary Worker — generate one-line summary for article_documents and entity_mentions.
-Uses title + snippet (and optional article_text slice). Stores in ai_summary field."""
+Uses title + snippet (and optional article_text slice). Stores in ai_summary field.
+Free tier: ~50 LLM calls/day; use batch 25+25 once/day to stay within limit."""
 from typing import Any
 
 from app.core.logging import get_logger
@@ -9,7 +10,7 @@ logger = get_logger(__name__)
 
 ENTITY_MENTIONS_COLLECTION = "entity_mentions"
 ARTICLE_DOCUMENTS_COLLECTION = "article_documents"
-BATCH_SIZE = 5
+DEFAULT_BATCH_SIZE = 25  # Per collection; 25+25 = 50/day keeps under OpenRouter free tier
 MAX_INPUT_CHARS = 1500
 
 
@@ -41,14 +42,20 @@ async def _generate_one_line_summary(text: str) -> str | None:
         return None
 
 
-async def run_ai_summary_worker() -> dict[str, int]:
+async def run_ai_summary_worker(batch_size: int | None = None) -> dict[str, int]:
     """
     Process article_documents and entity_mentions where ai_summary is missing.
     Generate one-line summary from title + snippet (and article_text when present). Update doc.
-    Returns {processed, skipped, errors}.
+    batch_size: per collection (default 25); 25+25 keeps under ~50 LLM calls/day (free tier).
+    Returns {processed, errors}.
     """
     await get_mongo_client()
+    from app.config import get_config
     from app.services.mongodb import get_db
+
+    if batch_size is None:
+        batch_size = (get_config().get("scheduler") or {}).get("ai_summary_batch_size", DEFAULT_BATCH_SIZE)
+
     db = get_db()
     em_coll = db[ENTITY_MENTIONS_COLLECTION]
     art_coll = db[ARTICLE_DOCUMENTS_COLLECTION]
@@ -64,7 +71,7 @@ async def run_ai_summary_worker() -> dict[str, int]:
                 {"ai_summary": None},
                 {"ai_summary": ""},
             ],
-        }).limit(BATCH_SIZE)
+        }).limit(batch_size)
         async for doc in cursor:
             title = (doc.get("title") or "").strip()
             snippet = (doc.get("summary") or doc.get("snippet") or "").strip()
@@ -93,7 +100,7 @@ async def run_ai_summary_worker() -> dict[str, int]:
                 {"ai_summary": None},
                 {"ai_summary": ""},
             ],
-        }).limit(BATCH_SIZE)
+        }).limit(batch_size)
         async for doc in cursor:
             title = (doc.get("title") or "").strip()
             snippet = (doc.get("summary") or "").strip()

@@ -57,12 +57,18 @@ export default function SentimentPage() {
           >
             Media
           </Link>
+          <Link
+            href="/media-intelligence"
+            className="text-sm text-zinc-400 hover:text-zinc-200"
+          >
+            Media Intelligence
+          </Link>
         </div>
         <h1 className="text-xl font-semibold mb-4 text-zinc-100">
           Sentiment Analysis
         </h1>
         <p className="text-sm text-zinc-500 mb-4">
-          Tone of media coverage for monitored entities. Filter by client:
+          Tone of media coverage for monitored entities (same pipeline as Media Intelligence). Filter by client to see client + competitors.
         </p>
         <input
           type="text"

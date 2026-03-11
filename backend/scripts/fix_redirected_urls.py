@@ -1,16 +1,21 @@
-"""One-off backfill to fix old Google News redirect URLs.
+"""Background URL resolution: fix Google News (and other) redirect URLs.
 
-Option 1: targeted backfill (no schema changes, no pipeline redesign).
+Safe to run repeatedly (cron-friendly). Resolves in batches so it does not block the crawler.
 
-Fixes two places:
+Fixes:
 1. article_documents: url/source_domain containing news.google.com
-2. entity_mentions: url containing news.google.com (what the UI shows for "Where was X mentioned?")
+2. entity_mentions: url containing news.google.com
 
-For each such document we resolve the redirect and update url (and for article_documents
-also url_resolved, source_domain, hashes). Safe to run multiple times.
+Usage:
+  python scripts/fix_redirected_urls.py           # no limit
+  python scripts/fix_redirected_urls.py --limit 50 # batch of 50 per collection
+
+Cron example (daily, small batch): 0 2 * * * cd /app && python scripts/fix_redirected_urls.py --limit 100
 """
 
+import argparse
 import asyncio
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -90,7 +95,7 @@ async def fix_redirected_entity_mentions(limit: int | None = None) -> dict[str, 
         try:
             await mentions_coll.update_one(
                 {"_id": doc["_id"]},
-                {"$set": {"url": resolved[:2000]}},
+                {"$set": {"url": resolved[:2000], "resolved_at": datetime.now(timezone.utc)}},
             )
             updated += 1
             logger.info(
@@ -185,6 +190,7 @@ async def fix_redirected_articles(limit: int | None = None) -> dict[str, Any]:
             "url_hash": new_url_hash,
             "content_hash": new_content_hash,
             "source_domain": source_domain[:200],
+            "resolved_at": datetime.now(timezone.utc),
         }
 
         try:
@@ -226,9 +232,12 @@ async def run_fix_all(limit: int | None = None) -> dict[str, Any]:
 
 
 if __name__ == "__main__":
-    result = asyncio.run(run_fix_all())
+    parser = argparse.ArgumentParser(description="Resolve redirect URLs (e.g. news.google.com) in article_documents and entity_mentions.")
+    parser.add_argument("--limit", type=int, default=None, help="Max documents to process per collection (for cron batches)")
+    args = parser.parse_args()
+    result = asyncio.run(run_fix_all(limit=args.limit))
     art = result["article_documents"]
     ment = result["entity_mentions"]
     if art["processed"] == 0 and ment["processed"] == 0:
-        print("\nNo stored documents had news.google.com URLs. If you still see Google News links for Sahi, those results are from live search (Google News RSS), not from the database.")
+        print("\nNo stored documents had news.google.com URLs. If you still see Google News links, those may be from live search (RSS), not the database.")
 

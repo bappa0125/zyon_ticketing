@@ -22,6 +22,7 @@ async def ensure_ingestion_indexes():
         try:
             em = db["entity_mentions"]
             await em.create_index([("entity", 1), ("published_at", -1)], name="ix_entity_published_at")
+            await em.create_index([("url", 1), ("entity", 1)], name="ix_url_entity")
         except Exception as e:
             logger.debug("entity_mentions_index_skip", error=str(e))
 
@@ -30,6 +31,17 @@ async def ensure_ingestion_indexes():
             ad = db["article_documents"]
             await ad.create_index("entities", name="ix_entities")
             await ad.create_index("url_hash", name="ix_url_hash")
+            # Unprocessed-first query for entity_mentions_worker (backlog drain)
+            await ad.create_index(
+                [("fetched_at", 1)],
+                name="ix_unprocessed_fetched",
+                partialFilterExpression={
+                    "$or": [
+                        {"entity_mentions_processed_at": None},
+                        {"entity_mentions_processed_at": {"$exists": False}},
+                    ]
+                },
+            )
         except Exception as e:
             logger.debug("article_documents_index_skip", error=str(e))
 

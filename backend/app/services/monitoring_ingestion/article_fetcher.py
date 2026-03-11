@@ -126,8 +126,56 @@ async def run_article_fetcher(max_items: int = MAX_BATCH) -> dict[str, Any]:
             continue
         article_text, article_length, url_original, url_resolved = _fetch_and_extract(url)
         if article_text is None:
-            await rss_coll.update_one({"_id": item["_id"]}, {"$set": {"status": STATUS_FAILED}})
-            failures += 1
+            # Workaround: store metadata-only article so we don't lose the article; entity_mentions_worker will create snippet mentions
+            url_for_hash = url_resolved or url_original
+            url_hash = _url_hash(url_for_hash)
+            content_hash = _content_hash((item.get("title") or ""), url_for_hash)
+            existing = await article_coll.find_one({"url_hash": url_hash})
+            if not existing:
+                existing = await article_coll.find_one({"content_hash": content_hash})
+            if existing:
+                await rss_coll.update_one({"_id": item["_id"]}, {"$set": {"status": STATUS_PROCESSED}})
+                duplicates_skipped += 1
+            else:
+                source_domain = _source_domain_from_url(url_resolved or url_original) or (item.get("source_domain") or "")[:200]
+                summary = (item.get("summary") or "").strip()[:5000]
+                title_raw = (item.get("title") or "")[:1000]
+                entities: list[str] = []
+                try:
+                    from app.services.entity_detection_service import detect_entities
+                    entities = detect_entities(f"{title_raw} {summary}"[:8000])
+                except Exception:
+                    pass
+                doc = {
+                    "url": (url_resolved or url_original)[:2000],
+                    "url_original": url_original[:2000],
+                    "url_resolved": (url_resolved or url_original)[:2000],
+                    "normalized_url": _normalize_url(url_for_hash)[:2000],
+                    "url_hash": url_hash,
+                    "content_hash": content_hash,
+                    "source_domain": source_domain[:200] if source_domain else "",
+                    "title": title_raw,
+                    "published_at": item.get("published_at"),
+                    "article_text": "",
+                    "article_length": 0,
+                    "fetched_at": datetime.now(timezone.utc),
+                    "entities": entities,
+                    "summary": summary,
+                }
+                try:
+                    await article_coll.insert_one(doc)
+                    await rss_coll.update_one({"_id": item["_id"]}, {"$set": {"status": STATUS_PROCESSED}})
+                    fetched += 1
+                    logger.info("article_fetcher_stored_metadata_only", url=url_original[:80])
+                except Exception as e:
+                    err_str = str(e).lower()
+                    if "duplicate" in err_str or "e11000" in err_str:
+                        await rss_coll.update_one({"_id": item["_id"]}, {"$set": {"status": STATUS_PROCESSED}})
+                        duplicates_skipped += 1
+                    else:
+                        logger.warning("article_fetcher_insert_failed", url=url[:100], error=str(e))
+                        await rss_coll.update_one({"_id": item["_id"]}, {"$set": {"status": STATUS_FAILED}})
+                        failures += 1
             continue
         # Deduplication and storage use resolved URL (real article URL, not Google News redirect)
         url_hash = _url_hash(url_resolved)
@@ -147,10 +195,8 @@ async def run_article_fetcher(max_items: int = MAX_BATCH) -> dict[str, Any]:
         title_raw = (item.get("title") or "")[:1000]
         entities: list[str] = []
         try:
-            from app.services.entity_detection_service import detect_entity
-            detected = detect_entity(f"{title_raw} {article_text[:8000]}")
-            if detected:
-                entities = [detected]
+            from app.services.entity_detection_service import detect_entities
+            entities = detect_entities(f"{title_raw} {article_text[:8000]}")
         except Exception:
             pass
         source_domain = _source_domain_from_url(url_resolved) or (item.get("source_domain") or "")[:200]

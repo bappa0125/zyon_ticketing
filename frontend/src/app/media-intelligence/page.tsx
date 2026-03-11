@@ -40,6 +40,7 @@ export default function MediaIntelligencePage() {
   const [loading, setLoading] = useState(true);
   const [loadingClients, setLoadingClients] = useState(true);
   const [selectedDomain, setSelectedDomain] = useState<string | null>(null);
+  const [contentQuality, setContentQuality] = useState<string>("");
 
   useEffect(() => {
     async function fetchClients() {
@@ -74,6 +75,7 @@ export default function MediaIntelligencePage() {
       range,
     });
     if (selectedDomain) params.set("domain", selectedDomain);
+    if (contentQuality) params.set("content_quality", contentQuality);
     (async () => {
       try {
         const res = await fetch(
@@ -92,7 +94,7 @@ export default function MediaIntelligencePage() {
     return () => {
       cancelled = true;
     };
-  }, [client, range, selectedDomain]);
+  }, [client, range, selectedDomain, contentQuality]);
 
   const entities = data ? [data.client, ...(data.competitors || [])] : [];
   const totalMentions = data?.coverage?.reduce((s, c) => s + c.mentions, 0) ?? 0;
@@ -176,6 +178,18 @@ export default function MediaIntelligencePage() {
                   {row.name || row.domain} ({row.total})
                 </option>
               ))}
+            </select>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="text-sm text-zinc-400">Content</label>
+            <select
+              value={contentQuality}
+              onChange={(e) => setContentQuality(e.target.value)}
+              className="px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-600 min-w-[140px]"
+            >
+              <option value="">All</option>
+              <option value="full_text">Full article only</option>
+              <option value="snippet">Snippet only</option>
             </select>
           </div>
           {data && (

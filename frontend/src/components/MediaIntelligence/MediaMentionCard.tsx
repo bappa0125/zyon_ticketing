@@ -1,5 +1,7 @@
 "use client";
 
+import { getEntityTailwindBg, getEntityTailwindText } from "@/lib/entityColors";
+
 export interface MediaMentionItem {
   id?: string;
   publisher: string;
@@ -69,13 +71,9 @@ export function MediaMentionCard({ item }: MediaMentionCardProps) {
     <article className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4 hover:border-zinc-700 transition-colors">
       <div className="flex flex-wrap items-center gap-2 mb-2">
         <span
-          className={`text-xs font-medium px-2 py-0.5 rounded ${
-            item.mention_type === "direct"
-              ? "bg-emerald-500/20 text-emerald-400"
-              : "bg-amber-500/20 text-amber-400"
-          }`}
+          className={`text-xs font-medium px-2 py-0.5 rounded ${getEntityTailwindBg(item.entity)} ${getEntityTailwindText(item.entity)}`}
         >
-          {item.mention_type === "direct" ? "Direct" : "Competitor"}
+          {item.entity}
         </span>
         <span
           className={`text-xs font-medium px-2 py-0.5 rounded ${

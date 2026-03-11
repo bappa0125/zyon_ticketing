@@ -1,5 +1,7 @@
 "use client";
 
+import { getEntityTailwindBg, getEntityTailwindText } from "@/lib/entityColors";
+
 export interface MediaArticle {
   title: string;
   source: string;
@@ -69,7 +71,15 @@ export function MediaTable({ articles, loading }: MediaTableProps) {
               <td className="px-4 py-3 text-sm text-zinc-400">
                 {a.date ? new Date(a.date).toLocaleDateString() : "—"}
               </td>
-              <td className="px-4 py-3 text-sm text-zinc-400">{a.entity || "—"}</td>
+              <td className="px-4 py-3">
+                {a.entity ? (
+                  <span className={`text-xs font-medium px-2 py-0.5 rounded ${getEntityTailwindBg(a.entity)} ${getEntityTailwindText(a.entity)}`}>
+                    {a.entity}
+                  </span>
+                ) : (
+                  <span className="text-sm text-zinc-400">—</span>
+                )}
+              </td>
             </tr>
           ))}
         </tbody>

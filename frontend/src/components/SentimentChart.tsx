@@ -1,5 +1,7 @@
 "use client";
 
+import { getEntityHex } from "@/lib/entityColors";
+
 export interface SentimentSummary {
   entity: string;
   positive: number;
@@ -35,9 +37,16 @@ export function SentimentChart({ summaries, loading }: SentimentChartProps) {
         const pctPos = (s.positive / total) * 100;
         const pctNeu = (s.neutral / total) * 100;
         const pctNeg = (s.negative / total) * 100;
+        const entityColorHex = getEntityHex(s.entity);
         return (
           <div key={i} className="rounded-lg border border-zinc-800 p-4 bg-zinc-900/30">
-            <h3 className="text-sm font-medium text-zinc-200 mb-3">{s.entity}</h3>
+            <div className="flex items-center gap-2 mb-3">
+              <span
+                className="w-2 h-2 rounded-full shrink-0"
+                style={{ backgroundColor: entityColorHex }}
+              />
+              <h3 className="text-sm font-medium text-zinc-200">{s.entity}</h3>
+            </div>
             <div className="flex items-center gap-2 mb-2">
               <div className="flex-1 h-6 flex rounded overflow-hidden bg-zinc-800">
                 {pctPos > 0 && (

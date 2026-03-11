@@ -1,5 +1,7 @@
 "use client";
 
+import { getEntityTailwindText } from "@/lib/entityColors";
+
 export interface DomainRow {
   domain: string;
   name: string;
@@ -56,10 +58,10 @@ export function CoverageByDomain({
             <tr>
               <th className="text-left py-2 pr-2 text-zinc-400 font-medium">Source</th>
               <th className="text-right py-2 px-1 text-zinc-400 font-medium">Total</th>
-              <th className="text-right py-2 px-1 text-zinc-400 font-medium">{clientName}</th>
+              <th className={`text-right py-2 px-1 font-medium ${getEntityTailwindText(clientName)}`}>{clientName}</th>
               {showCompetitorColumns
                 ? competitors.map((comp) => (
-                    <th key={comp} className="text-right py-2 px-1 text-zinc-400 font-medium">
+                    <th key={comp} className={`text-right py-2 px-1 font-medium ${getEntityTailwindText(comp)}`}>
                       {comp}
                     </th>
                   ))
@@ -82,10 +84,10 @@ export function CoverageByDomain({
                     {row.name || row.domain}
                   </td>
                   <td className="text-right py-1.5 px-1 text-zinc-400">{row.total}</td>
-                  <td className="text-right py-1.5 px-1 text-emerald-400">{clientCount}</td>
+                  <td className={`text-right py-1.5 px-1 ${getEntityTailwindText(clientName)}`}>{clientCount}</td>
                   {showCompetitorColumns
                     ? competitors.map((comp) => (
-                        <td key={comp} className="text-right py-1.5 px-1 text-zinc-400">
+                        <td key={comp} className={`text-right py-1.5 px-1 ${getEntityTailwindText(comp)}`}>
                           {row.entities[comp] ?? 0}
                         </td>
                       ))

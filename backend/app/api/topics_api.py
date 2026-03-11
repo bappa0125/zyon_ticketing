@@ -1,47 +1,22 @@
-"""Topic Analytics API — aggregate topic mentions from media coverage."""
+"""Topic Analytics API — aggregate topics from entity_mentions + article_documents.
+Uses article_documents.topics (KeyBERT) joined by url."""
 from typing import Optional
 
 from fastapi import APIRouter
 
-from app.services.mongodb import get_mongo_client
+from app.services.topics_service import get_topics_analytics
 
 router = APIRouter(tags=["topics"])
 
-COLLECTION_NAME = "media_articles"
-
 
 @router.get("/topics")
-async def get_topics(client: Optional[str] = None):
+async def get_topics(client: Optional[str] = None, range_param: str = "7d"):
     """
-    Return topic analytics: topic phrases with mention counts.
-    Optional ?client=Sahi to filter by client.
+    Return topic analytics from entity_mentions + article_documents.
+    Topics stored on article_documents (KeyBERT), joined by url.
+    ?client=Sahi to filter by client entities.
+    ?range_param=24h|7d|30d for time window.
+    Returns: topics with mentions, trend_pct, sentiment, by_entity, sample_headlines, action (talk/careful/avoid).
     """
-    await get_mongo_client()
-    from app.services.mongodb import get_db
-
-    db = get_db()
-    coll = db[COLLECTION_NAME]
-
-    match: dict = {}
-    if client:
-        match["client"] = client
-
-    pipeline = [
-        {"$match": match},
-        {"$match": {"topics": {"$exists": True, "$ne": [], "$type": "array"}}},
-        {"$unwind": "$topics"},
-        {"$group": {"_id": "$topics", "mentions": {"$sum": 1}}},
-        {"$project": {"topic": "$_id", "mentions": 1, "_id": 0}},
-        {"$sort": {"mentions": -1}},
-    ]
-
-    topics = []
-    async for doc in coll.aggregate(pipeline):
-        topic_str = doc.get("topic", "")
-        if topic_str:
-            topics.append({
-                "topic": topic_str,
-                "mentions": doc.get("mentions", 0),
-            })
-
-    return {"topics": topics}
+    data = await get_topics_analytics(client=client, range_param=range_param)
+    return {"topics": data["topics"], "client": data.get("client"), "competitors": data.get("competitors", []), "range": data.get("range", "7d")}

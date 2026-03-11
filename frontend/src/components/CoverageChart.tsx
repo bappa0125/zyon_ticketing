@@ -1,5 +1,7 @@
 "use client";
 
+import { getEntityHex } from "@/lib/entityColors";
+
 export interface CoverageRow {
   entity: string;
   mentions: number;
@@ -31,16 +33,23 @@ export function CoverageChart({ coverage, loading }: CoverageChartProps) {
     <div className="space-y-4">
       {coverage.map((c, i) => {
         const pct = maxMentions > 0 ? (c.mentions / maxMentions) * 100 : 0;
+        const colorHex = getEntityHex(c.entity);
         return (
           <div key={i} className="rounded-lg border border-zinc-800 p-4 bg-zinc-900/30">
             <div className="flex items-center justify-between gap-4 mb-2">
-              <span className="text-sm font-medium text-zinc-200">{c.entity}</span>
+              <div className="flex items-center gap-2">
+                <span
+                  className="w-2 h-2 rounded-full shrink-0"
+                  style={{ backgroundColor: colorHex }}
+                />
+                <span className="text-sm font-medium text-zinc-200">{c.entity}</span>
+              </div>
               <span className="text-sm text-zinc-400">{c.mentions} mentions</span>
             </div>
             <div className="h-4 rounded bg-zinc-800 overflow-hidden">
               <div
-                className="h-full bg-zinc-500 rounded"
-                style={{ width: `${pct}%`, minWidth: c.mentions > 0 ? "4px" : 0 }}
+                className="h-full rounded"
+                style={{ width: `${pct}%`, minWidth: c.mentions > 0 ? "4px" : 0, backgroundColor: colorHex }}
               />
             </div>
           </div>

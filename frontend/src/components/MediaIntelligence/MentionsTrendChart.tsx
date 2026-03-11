@@ -1,5 +1,7 @@
 "use client";
 
+import { getEntityHex } from "@/lib/entityColors";
+
 export interface TimelineDay {
   date: string;
   [entity: string]: string | number;
@@ -12,7 +14,6 @@ interface MentionsTrendChartProps {
   loading?: boolean;
 }
 
-const COLORS = ["#10b981", "#f59e0b", "#6366f1", "#ec4899", "#14b8a6"];
 const W = 280;
 const H = 100;
 const PAD = { top: 4, right: 4, bottom: 18, left: 28 };
@@ -57,12 +58,12 @@ export function MentionsTrendChart({
     <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-4">
       <h3 className="text-sm font-medium text-zinc-300 mb-3">Mentions over time</h3>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full max-w-full h-28" preserveAspectRatio="xMidYMid meet">
-        {entities.map((entity, j) => (
+        {entities.map((entity) => (
           <path
             key={entity}
             d={pathD(entity)}
             fill="none"
-            stroke={COLORS[j % COLORS.length]}
+            stroke={getEntityHex(entity)}
             strokeWidth={clientName && entity.toLowerCase() === clientName.toLowerCase() ? 2.5 : 1.5}
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -88,13 +89,13 @@ export function MentionsTrendChart({
         })}
       </svg>
       <div className="flex flex-wrap gap-3 mt-1 pt-2 border-t border-zinc-800">
-        {entities.map((e, j) => {
+        {entities.map((e) => {
           const isClient = clientName && e.toLowerCase() === clientName.toLowerCase();
           return (
             <span key={e} className="flex items-center gap-1.5 text-xs text-zinc-400">
               <span
                 className="w-2 h-2 rounded-full shrink-0"
-                style={{ backgroundColor: COLORS[j % COLORS.length] }}
+                style={{ backgroundColor: getEntityHex(e) }}
               />
               {e}
               {isClient && " (client)"}

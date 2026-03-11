@@ -119,6 +119,19 @@ def _job_ai_summary():
         logger.exception("scheduler_job_failed", job="ai_summary", error=str(e))
 
 
+def _job_article_topics():
+    """Scheduled job: Extract topics (KeyBERT) on article_documents where topics is missing."""
+    from app.services.article_topics_worker import run_article_topics_pipeline
+
+    logger.info("scheduler_job_start", job="article_topics")
+    try:
+        batch = (get_config().get("scheduler") or {}).get("article_topics_batch_size", 30)
+        result = asyncio.run(run_article_topics_pipeline(batch_size=batch))
+        logger.info("scheduler_job_complete", job="article_topics", result=result)
+    except Exception as e:
+        logger.exception("scheduler_job_failed", job="article_topics", error=str(e))
+
+
 def start_scheduler():
     """Start the ingestion scheduler if enabled in config."""
     global _scheduler
@@ -138,6 +151,7 @@ def start_scheduler():
     forum_min = sched_cfg.get("forum_ingestion_interval_minutes", 360)
     sentiment_min = sched_cfg.get("entity_mentions_sentiment_interval_minutes", 20)
     ai_summary_hours = sched_cfg.get("ai_summary_interval_hours", 24)
+    article_topics_min = sched_cfg.get("article_topics_interval_minutes", 60)
 
     _scheduler = BackgroundScheduler(daemon=True)
     _scheduler.add_job(_job_rss, "interval", hours=rss_hours, id="rss_ingestion")
@@ -145,6 +159,7 @@ def start_scheduler():
     _scheduler.add_job(_job_entity_mentions, "interval", minutes=entity_min, id="entity_mentions")
     _scheduler.add_job(_job_entity_mentions_sentiment, "interval", minutes=sentiment_min, id="entity_mentions_sentiment")
     _scheduler.add_job(_job_ai_summary, "interval", hours=ai_summary_hours, id="ai_summary")
+    _scheduler.add_job(_job_article_topics, "interval", minutes=article_topics_min, id="article_topics")
     _scheduler.add_job(_job_reddit, "interval", minutes=reddit_min, id="reddit_monitor")
     _scheduler.add_job(_job_youtube, "interval", minutes=youtube_min, id="youtube_monitor")
     _scheduler.add_job(_job_crawler_enqueue, "interval", minutes=crawler_min, id="crawler_enqueue")
@@ -162,6 +177,7 @@ def start_scheduler():
         forum_ingestion_interval_minutes=forum_min,
         entity_mentions_sentiment_interval_minutes=sentiment_min,
         ai_summary_interval_hours=ai_summary_hours,
+        article_topics_interval_minutes=article_topics_min,
     )
 
 

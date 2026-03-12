@@ -3,12 +3,7 @@
 import { useState, useEffect } from "react";
 import { ClientTable } from "@/components/ClientTable";
 import Link from "next/link";
-
-function getApiUrl(): string {
-  if (typeof window === "undefined")
-    return process.env.NEXT_PUBLIC_API_URL || "http://localhost/api";
-  return "/api";
-}
+import { getApiBase } from "@/lib/api";
 
 export default function ClientsPage() {
   const [clients, setClients] = useState<
@@ -19,7 +14,7 @@ export default function ClientsPage() {
   useEffect(() => {
     async function fetchClients() {
       try {
-        const res = await fetch(`${getApiUrl()}/clients`);
+        const res = await fetch(`${getApiBase()}/clients`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         setClients(data.clients ?? []);
@@ -34,7 +29,7 @@ export default function ClientsPage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-[var(--background)] p-6">
+    <div className="app-page p-6">
       <div className="max-w-4xl mx-auto">
         <div className="flex items-center gap-4 mb-6">
           <Link

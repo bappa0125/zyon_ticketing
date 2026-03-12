@@ -30,6 +30,26 @@ const strong = "text-[var(--ai-text)]";
 
 export const PAGE_HELP: Record<string, PageHelp> = {
   "/": {
+    title: "Home",
+    summary: "Overview of all app sections. Each card links to a page: Chat, Dashboard, Topics, Reputation, Alerts, Targets, Media Intel, Sentiment, Coverage, Clients, Media, Opportunities, Social.",
+    sections: [
+      {
+        sectionTitle: "Where to go",
+        whatItIs: (
+          <p className={p}>
+            Use the cards to jump to any section. Descriptions match what each page does so you can choose the right view.
+          </p>
+        ),
+        prAgencyUse: (
+          <p className={p + " " + muted}>
+            Start with Dashboard for client pulse; use Chat for ad-hoc questions; use Alerts and Reputation for risk and response.
+          </p>
+        ),
+      },
+    ],
+  },
+
+  "/chat": {
     title: "Chat",
     summary: "Conversational AI with live search and pipeline steps. Ask questions in natural language; the assistant can run retrieval and show reasoning.",
     sections: [

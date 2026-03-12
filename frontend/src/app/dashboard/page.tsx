@@ -7,11 +7,7 @@ import { MentionsPerDayChart, type TimelineRow } from "@/components/MediaIntelli
 import { RankedSourcesTable, type RankedSourceRow } from "@/components/MediaIntelligence/RankedSourcesTable";
 import { TopPublicationsList, type PubRow } from "@/components/MediaIntelligence/TopPublicationsList";
 import { TopicTable, type TopicRow } from "@/components/TopicTable";
-
-function getApiUrl(): string {
-  if (typeof window === "undefined") return process.env.NEXT_PUBLIC_API_URL || "http://localhost/api";
-  return "/api";
-}
+import { getApiBase } from "@/lib/api";
 
 const RANGE_OPTIONS = [
   { value: "24h", label: "24h" },
@@ -65,7 +61,7 @@ export default function DashboardPage() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`${getApiUrl()}/clients`);
+        const res = await fetch(`${getApiBase()}/clients`);
         if (!res.ok) throw new Error("clients failed");
         const json = await res.json();
         const list = json.clients ?? [];
@@ -84,13 +80,13 @@ export default function DashboardPage() {
   const downloadUrl = useMemo(() => {
     if (!client.trim()) return "";
     const params = new URLSearchParams({ client: client.trim(), range });
-    return `${getApiUrl()}/reports/pulse.html?${params.toString()}`;
+    return `${getApiBase()}/reports/pulse.html?${params.toString()}`;
   }, [client, range]);
 
   const pdfDownloadUrl = useMemo(() => {
     if (!client.trim()) return "";
     const params = new URLSearchParams({ client: client.trim(), range });
-    return `${getApiUrl()}/reports/pulse.pdf?${params.toString()}`;
+    return `${getApiBase()}/reports/pulse.pdf?${params.toString()}`;
   }, [client, range]);
 
   useEffect(() => {
@@ -109,7 +105,7 @@ export default function DashboardPage() {
     (async () => {
       try {
         const params = new URLSearchParams({ client: client.trim(), range });
-        const res = await fetch(`${getApiUrl()}/reports/pulse?${params.toString()}`);
+        const res = await fetch(`${getApiBase()}/reports/pulse?${params.toString()}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = (await res.json()) as PulseResponse;
         if (!cancelled) setPulse(data);
@@ -276,7 +272,7 @@ export default function DashboardPage() {
                     setAiBusy(true);
                     setAiError("");
                     try {
-                      const res = await fetch(`${getApiUrl()}/reports/ai-brief`, {
+                      const res = await fetch(`${getApiBase()}/reports/ai-brief`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ client: client.trim(), range }),

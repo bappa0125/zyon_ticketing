@@ -66,3 +66,36 @@ reports_ai:
   ai_brief_ttl_hours_30d: 48
   ai_brief_max_topics: 12
   ai_brief_max_headlines: 20
+
+# Reddit trending pipeline (separate from Apify/social_posts)
+reddit_trending:
+  enabled: true
+  subreddits:
+    - IndianStreetBets
+    - IndiaInvestments
+    - IndianStockMarket
+    - stocks
+    - investing
+    - wallstreetbets
+    - options
+    - BogleHeads
+    - StockMarket
+  sort: hot
+  top_period: day
+  posts_per_subreddit: 20
+  delay_seconds_between_subreddits: 1.5
+  user_agent: "ZyonRedditTrending/1.0"
+  mongodb:
+    database: chat
+    posts_collection: reddit_trending_posts
+    summaries_collection: reddit_trending_summaries
+  redis:
+    key_prefix: "reddit_trending"
+    posts_ttl_seconds: 1800
+    themes_ttl_seconds: 3600
+    sahi_suggestions_ttl_seconds: 3600
+  llm:
+    model: openrouter/free
+    max_tokens_themes: 400
+    max_tokens_sahi: 400
+  fetch_interval_minutes: 45

@@ -115,6 +115,21 @@ def _truncate(s: str, n: int) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
+def _json_safe(obj: Any) -> Any:
+    """Convert payload to JSON-serializable form (e.g. datetime -> ISO string)."""
+    if obj is None:
+        return None
+    if isinstance(obj, datetime):
+        return obj.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_json_safe(v) for v in obj]
+    if isinstance(obj, (str, int, float, bool)):
+        return obj
+    return str(obj)
+
+
 async def _build_ai_brief_payload(client: str, range_param: str) -> dict[str, Any]:
     """
     Build a small, grounded payload for the LLM.
@@ -198,7 +213,7 @@ async def _llm_generate_ai_brief(payload: dict[str, Any]) -> dict[str, Any]:
         "Pick 5 target_outlets from domains present in the data.\n"
         "Pick 3-4 focus_articles strictly from the provided headlines (must match title+url). "
         "If headlines are missing/empty, return an empty focus_articles array and mention that in executive_summary.\n\n"
-        f"DATA:\n{json.dumps(payload, ensure_ascii=False)}"
+        f"DATA:\n{json.dumps(_json_safe(payload), ensure_ascii=False)}"
     )
 
     gateway = LLMGateway()
@@ -257,42 +272,46 @@ async def reports_ai_brief(req: AIBriefRequest):
     if not bool(ai_cfg.get("ai_brief_enabled", True)):
         raise HTTPException(status_code=403, detail="AI brief disabled")
 
-    ttl_seconds, max_per_day = _ai_limits(range_param)
-    bucket = _cache_bucket(range_param)
-    cache_key = f"{AI_BRIEF_CACHE_PREFIX}:{client}:{range_param}:{bucket}"
+    try:
+        ttl_seconds, max_per_day = _ai_limits(range_param)
+        bucket = _cache_bucket(range_param)
+        cache_key = f"{AI_BRIEF_CACHE_PREFIX}:{client}:{range_param}:{bucket}"
 
-    r = await get_redis()
-    cached = await r.get(cache_key)
-    if cached:
-        try:
-            obj = json.loads(cached)
-        except Exception:
-            obj = {"_raw": cached}
-        return {"cached": True, "cache_key": cache_key, "generated_at": obj.get("generated_at"), "brief": obj.get("brief") or obj}
+        r = await get_redis()
+        cached = await r.get(cache_key)
+        if cached:
+            try:
+                obj = json.loads(cached)
+            except Exception:
+                obj = {"_raw": cached}
+            return {"cached": True, "cache_key": cache_key, "generated_at": obj.get("generated_at"), "brief": obj.get("brief") or obj}
 
-    # Quota gate (only when cache miss)
-    day_key = f"{AI_BRIEF_DAILY_COUNT_KEY_PREFIX}:{_today_key()}"
-    count = await r.incr(day_key)
-    if count == 1:
-        await r.expire(day_key, 60 * 60 * 48)  # keep for 2 days
-    if count > max_per_day:
-        # Do NOT call LLM
-        raise HTTPException(status_code=429, detail=f"Daily AI brief limit reached ({max_per_day}/day). Try later or use cached briefs.")
+        # Quota gate (only when cache miss)
+        day_key = f"{AI_BRIEF_DAILY_COUNT_KEY_PREFIX}:{_today_key()}"
+        count = await r.incr(day_key)
+        if count == 1:
+            await r.expire(day_key, 60 * 60 * 48)  # keep for 2 days
+        if count > max_per_day:
+            raise HTTPException(status_code=429, detail=f"Daily AI brief limit reached ({max_per_day}/day). Try later or use cached briefs.")
 
-    payload = await _build_ai_brief_payload(client=client, range_param=range_param)
-    brief = await _llm_generate_ai_brief(payload)
-    wrapped = {
-        "generated_at": _fmt_dt(datetime.now(timezone.utc)),
-        "client": payload.get("client") or client,
-        "range": range_param,
-        "brief": brief,
-        "inputs": {
-            "topics_n": len(payload.get("topics") or []),
-            "headlines_n": len(payload.get("headlines") or []),
-        },
-    }
-    await r.setex(cache_key, ttl_seconds, json.dumps(wrapped, ensure_ascii=False))
-    return {"cached": False, "cache_key": cache_key, **wrapped}
+        payload = await _build_ai_brief_payload(client=client, range_param=range_param)
+        brief = await _llm_generate_ai_brief(payload)
+        wrapped = {
+            "generated_at": _fmt_dt(datetime.now(timezone.utc)),
+            "client": payload.get("client") or client,
+            "range": range_param,
+            "brief": brief,
+            "inputs": {
+                "topics_n": len(payload.get("topics") or []),
+                "headlines_n": len(payload.get("headlines") or []),
+            },
+        }
+        await r.setex(cache_key, ttl_seconds, json.dumps(_json_safe(wrapped), ensure_ascii=False))
+        return {"cached": False, "cache_key": cache_key, **wrapped}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI brief failed: {e!s}")
 
 def _render_pulse_html(*, client: str, range_param: str, dashboard: dict[str, Any], topics: list[dict[str, Any]]) -> str:
     now = _fmt_dt(datetime.now(timezone.utc))

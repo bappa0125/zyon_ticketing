@@ -107,7 +107,12 @@ async def run_article_fetcher(max_items: int = MAX_BATCH) -> dict[str, Any]:
     except Exception:
         pass
 
-    cursor = rss_coll.find({"status": STATUS_NEW}).limit(max_items)
+    # Process newest first (published_at desc, then discovered_at desc) so new URLs become articles quickly
+    cursor = (
+        rss_coll.find({"status": STATUS_NEW})
+        .sort([("published_at", -1), ("discovered_at", -1)])
+        .limit(max_items)
+    )
     items = await cursor.to_list(length=max_items)
     if not items:
         logger.info("article_fetcher_no_new_items")

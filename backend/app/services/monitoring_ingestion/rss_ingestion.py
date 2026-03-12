@@ -13,7 +13,7 @@ COLLECTION_NAME = "rss_items"
 DEFAULT_STATUS = "new"
 MAX_FEEDS_PER_RUN = 10
 REQUEST_TIMEOUT = 15
-DEFAULT_FRESHNESS_HOURS = 72
+DEFAULT_FRESHNESS_HOURS = 168  # 7 days: avoid skipping recent articles when runs are 4h apart
 
 
 def _parse_published(entry: Any) -> datetime | None:
@@ -70,12 +70,13 @@ def _extract_entries(feed_url: str, source_domain: str, rss_feed: str) -> list[d
     return items
 
 
-async def run_rss_ingestion(max_feeds: int = MAX_FEEDS_PER_RUN) -> dict[str, int]:
+async def run_rss_ingestion(max_feeds: int = MAX_FEEDS_PER_RUN, force: bool = False) -> dict[str, int]:
     """
     Run one RSS ingestion cycle: get RSS sources from registry + scheduler + queue,
     fetch up to max_feeds feeds sequentially, extract metadata, apply freshness filter,
     store in rss_items with deduplication by url. Returns feeds_processed, articles_discovered,
     duplicates_skipped, fresh_items_inserted, stale_items_skipped.
+    When force=True, ignore crawl readiness and run up to max_feeds (for on-demand / testing).
     """
     from motor.motor_asyncio import AsyncIOMotorClient
 
@@ -98,7 +99,10 @@ async def run_rss_ingestion(max_feeds: int = MAX_FEEDS_PER_RUN) -> dict[str, int
             "stale_items_skipped": 0,
         }
 
-    ready = get_ready_sources(rss_sources)
+    if force:
+        ready = rss_sources
+    else:
+        ready = get_ready_sources(rss_sources)
     ordered = get_ordered_ready_sources(ready)[:max_feeds]
 
     config = get_config()
@@ -138,12 +142,17 @@ async def run_rss_ingestion(max_feeds: int = MAX_FEEDS_PER_RUN) -> dict[str, int
         mark_crawled(domain)
         feed_fresh = 0
         feed_stale = 0
+        now_utc = datetime.now(timezone.utc)
         for item in entries:
             articles_discovered += 1
             published_at = item.get("published_at")
             if published_at is not None and published_at.tzinfo is None:
                 published_at = published_at.replace(tzinfo=timezone.utc)
-            if published_at is None or published_at < cutoff:
+            # If feed has no date, treat as "just discovered" so we don't skip whole feeds
+            if published_at is None:
+                published_at = item.get("discovered_at") or now_utc
+                item["published_at"] = published_at
+            if published_at < cutoff:
                 feed_stale += 1
                 stale_skipped += 1
                 logger.debug("rss_ingestion_stale_skipped", url=item.get("url", "")[:80], published_at=str(published_at))

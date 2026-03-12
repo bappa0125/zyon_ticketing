@@ -71,5 +71,6 @@ def get_config() -> dict[str, Any]:
         "monitoring": load_monitoring_yaml().get("monitoring", {}),
         "chat": base.get("chat", {}),
         "scheduler": base.get("scheduler", {}),
+        "reddit_trending": base.get("reddit_trending", {}),
         "settings": settings,
     }

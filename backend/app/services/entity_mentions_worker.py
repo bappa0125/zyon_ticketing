@@ -19,10 +19,11 @@ _FORUM_DOMAINS = {
 }
 
 
-async def run_entity_mentions_pipeline(batch_size: int = BATCH_SIZE) -> dict[str, int]:
+async def run_entity_mentions_pipeline(batch_size: int = BATCH_SIZE, newest_first: bool = False) -> dict[str, int]:
     """
-    Read article_documents (unprocessed first to drain backlog), run entity detection,
+    Read article_documents (unprocessed), run entity detection,
     validate context, write entity_mentions, mark each doc as processed.
+    When newest_first=True, process newest articles first (for on-demand pipeline so UI updates).
     Returns {processed, inserted, skipped, errors}.
     """
     from app.services.entity_detection_service import detect_entities
@@ -39,9 +40,10 @@ async def run_entity_mentions_pipeline(batch_size: int = BATCH_SIZE) -> dict[str
             {"entity_mentions_processed_at": None},
         ]
     }
+    sort_order = [("fetched_at", -1)] if newest_first else [("fetched_at", 1)]
     cursor = (
         article_coll.find(unprocessed_query)
-        .sort("fetched_at", 1)
+        .sort(sort_order)
         .limit(batch_size)
     )
     docs = await cursor.to_list(length=batch_size)

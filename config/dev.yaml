@@ -4,8 +4,10 @@
 # Ingestion scheduler (runs in backend process)
 scheduler:
   enabled: true
-  rss_interval_hours: 4
+  rss_interval_hours: 1              # Run RSS every 1h to catch new URLs more often
+  rss_max_feeds_per_run: 35          # More feeds per run = more new items per cycle
   article_fetcher_interval_minutes: 10
+  article_fetcher_max_items_per_run: 40  # rss_items (status=new) to fetch per run
   entity_mentions_interval_minutes: 15
   entity_mentions_batch_size: 150  # Unprocessed-first; drain backlog without blocking
   entity_mentions_sentiment_interval_minutes: 20  # VADER sentiment on new entity_mentions
@@ -111,3 +113,41 @@ url_discovery:
   max_results: 10
   max_validation_pages: 5
   rate_limit_per_minute: 3
+
+# Reddit trending pipeline (separate from Apify/social_posts). Uses Reddit JSON API + LLM.
+reddit_trending:
+  enabled: true
+  # Subreddits: India + global trading/investing
+  subreddits:
+    - IndianStreetBets
+    - IndiaInvestments
+    - IndianStockMarket
+    - stocks
+    - investing
+    - wallstreetbets
+    - options
+    - BogleHeads
+    - StockMarket
+  sort: hot          # hot | new | top
+  top_period: day    # day | week (only if sort=top)
+  posts_per_subreddit: 20
+  delay_seconds_between_subreddits: 1.5  # Respect Reddit rate limit
+  user_agent: "ZyonRedditTrending/1.0"
+  # MongoDB: separate collections (same DB as app)
+  mongodb:
+    database: chat
+    posts_collection: reddit_trending_posts
+    summaries_collection: reddit_trending_summaries
+  # Redis: separate key namespace
+  redis:
+    key_prefix: "reddit_trending"
+    posts_ttl_seconds: 1800       # 30 min
+    themes_ttl_seconds: 3600      # 1 h
+    sahi_suggestions_ttl_seconds: 3600
+  # LLM (OpenRouter free tier)
+  llm:
+    model: openrouter/free
+    max_tokens_themes: 400
+    max_tokens_sahi: 400
+  # Scheduler
+  fetch_interval_minutes: 45

@@ -6,11 +6,7 @@ import { SentimentMentionCard } from "@/components/Sentiment/SentimentMentionCar
 import type { MediaMentionItem } from "@/components/MediaIntelligence/MediaMentionCard";
 import Link from "next/link";
 
-function getApiUrl(): string {
-  if (typeof window === "undefined")
-    return process.env.NEXT_PUBLIC_API_URL || "http://localhost/api";
-  return "/api";
-}
+import { getApiBase } from "@/lib/api";
 
 const RANGE_OPTIONS = [
   { value: "24h", label: "24h" },
@@ -47,7 +43,7 @@ export default function SentimentPage() {
   useEffect(() => {
     async function fetchClients() {
       try {
-        const res = await fetch(`${getApiUrl()}/clients`);
+        const res = await fetch(`${getApiBase()}/clients`);
         if (!res.ok) throw new Error("Failed to load clients");
         const json = await res.json();
         const list = (json.clients ?? []).map((c: { name?: string; domain?: string; competitors?: string[] }) => ({
@@ -80,7 +76,7 @@ export default function SentimentPage() {
     setLoading(true);
     const params = new URLSearchParams({ client });
     if (effectiveEntity) params.set("entity", effectiveEntity);
-    fetch(`${getApiUrl()}/sentiment/summary?${params.toString()}`)
+    fetch(`${getApiBase()}/sentiment/summary?${params.toString()}`)
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
       .then((data) => setSummaries(data.summaries ?? []))
       .catch(() => setSummaries([]))
@@ -97,7 +93,7 @@ export default function SentimentPage() {
     const params = new URLSearchParams({ client, range });
     if (sentimentFilter) params.set("sentiment", sentimentFilter);
     if (effectiveEntity) params.set("entity", effectiveEntity);
-    fetch(`${getApiUrl()}/sentiment/mentions?${params.toString()}`)
+    fetch(`${getApiBase()}/sentiment/mentions?${params.toString()}`)
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
       .then((data) => setMentions(data.mentions ?? []))
       .catch(() => setMentions([]))

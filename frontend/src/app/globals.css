@@ -26,7 +26,8 @@
   --ai-max-content: 76rem;
   --glass-bg: rgba(22, 22, 31, 0.72);
   --glass-border: rgba(255, 255, 255, 0.08);
-  /* Aliases so pages still using --mw-* get AI theme */
+  /* Aliases so pages still using --mw-* or --background get AI theme */
+  --background: var(--ai-bg);
   --mw-bg: var(--ai-bg);
   --mw-surface: var(--ai-surface);
   --mw-surface-2: var(--ai-bg-elevated);

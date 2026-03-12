@@ -1,11 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-
-function getApiUrl(): string {
-  if (typeof window === "undefined") return process.env.NEXT_PUBLIC_API_URL || "http://localhost/api";
-  return "/api";
-}
+import { getApiBase } from "@/lib/api";
 
 const RANGE_OPTIONS = [
   { value: "24h", label: "24h" },
@@ -34,7 +30,7 @@ export default function AlertsPage() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`${getApiUrl()}/clients`);
+        const res = await fetch(`${getApiBase()}/clients`);
         if (!res.ok) throw new Error("clients failed");
         const json = await res.json();
         const list = json.clients ?? [];
@@ -53,7 +49,7 @@ export default function AlertsPage() {
   const downloadUrl = useMemo(() => {
     if (!client.trim()) return "";
     const params = new URLSearchParams({ client: client.trim(), range });
-    return `${getApiUrl()}/reports/alerts.html?${params.toString()}`;
+    return `${getApiBase()}/reports/alerts.html?${params.toString()}`;
   }, [client, range]);
 
   useEffect(() => {
@@ -66,7 +62,7 @@ export default function AlertsPage() {
     (async () => {
       try {
         const params = new URLSearchParams({ client: client.trim(), range });
-        const res = await fetch(`${getApiUrl()}/reports/alerts?${params.toString()}`);
+        const res = await fetch(`${getApiBase()}/reports/alerts?${params.toString()}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = (await res.json()) as AlertsResponse;
         if (!cancelled) setData(json);
@@ -83,7 +79,7 @@ export default function AlertsPage() {
   }, [client, range]);
 
   return (
-    <div className="min-h-screen bg-[var(--background)] text-zinc-200">
+    <div className="app-page">
       <div className="max-w-6xl mx-auto p-6">
         <header className="flex flex-wrap items-center justify-between gap-4 py-4 border-b border-zinc-800 mb-6">
           <div>

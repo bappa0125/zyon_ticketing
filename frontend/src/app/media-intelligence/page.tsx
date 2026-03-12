@@ -8,11 +8,7 @@ import { MentionsTrendChart } from "@/components/MediaIntelligence/MentionsTrend
 import { TopPublicationsList } from "@/components/MediaIntelligence/TopPublicationsList";
 import { TopicsList } from "@/components/MediaIntelligence/TopicsList";
 import { CoverageByDomain, type DomainRow } from "@/components/MediaIntelligence/CoverageByDomain";
-
-function getApiUrl(): string {
-  if (typeof window === "undefined") return process.env.NEXT_PUBLIC_API_URL || "http://localhost/api";
-  return "/api";
-}
+import { getApiBase } from "@/lib/api";
 
 interface DashboardData {
   client: string;
@@ -45,7 +41,7 @@ export default function MediaIntelligencePage() {
   useEffect(() => {
     async function fetchClients() {
       try {
-        const res = await fetch(`${getApiUrl()}/clients`);
+        const res = await fetch(`${getApiBase()}/clients`);
         if (!res.ok) throw new Error("Failed to load clients");
         const json = await res.json();
         const list = json.clients ?? [];
@@ -79,7 +75,7 @@ export default function MediaIntelligencePage() {
     (async () => {
       try {
         const res = await fetch(
-          `${getApiUrl()}/media-intelligence/dashboard?${params.toString()}`
+          `${getApiBase()}/media-intelligence/dashboard?${params.toString()}`
         );
         if (!res.ok) throw new Error("Dashboard failed");
         const json = await res.json();
@@ -101,7 +97,7 @@ export default function MediaIntelligencePage() {
   const feedItems = data?.feed ?? [];
 
   return (
-    <div className="min-h-screen bg-[var(--background)] text-zinc-200">
+    <div className="app-page">
       <nav className="border-b border-zinc-800 bg-zinc-950 px-4 py-2 flex flex-wrap gap-2">
         <Link href="/" className="text-sm text-zinc-400 hover:text-zinc-200">
           ← Chat

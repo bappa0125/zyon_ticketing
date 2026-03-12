@@ -1,5 +1,6 @@
 """In-process ingestion scheduler: RSS (4h), article fetch (10m), entity mentions (15m)."""
 import asyncio
+from datetime import datetime, timedelta, timezone
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from app.config import get_config
@@ -14,9 +15,11 @@ def _job_rss():
     """Scheduled job: RSS ingestion every N hours."""
     from app.services.monitoring_ingestion.rss_ingestion import run_rss_ingestion
 
+    sched = (get_config().get("scheduler") or {})
+    max_feeds = sched.get("rss_max_feeds_per_run", 20)
     logger.info("scheduler_job_start", job="rss_ingestion")
     try:
-        result = asyncio.run(run_rss_ingestion(max_feeds=10))
+        result = asyncio.run(run_rss_ingestion(max_feeds=max_feeds))
         logger.info("scheduler_job_complete", job="rss_ingestion", result=result)
     except Exception as e:
         logger.exception("scheduler_job_failed", job="rss_ingestion", error=str(e))
@@ -26,9 +29,11 @@ def _job_article_fetcher():
     """Scheduled job: Article fetch every N minutes."""
     from app.services.monitoring_ingestion.article_fetcher import run_article_fetcher
 
+    sched = (get_config().get("scheduler") or {})
+    max_items = sched.get("article_fetcher_max_items_per_run", 40)
     logger.info("scheduler_job_start", job="article_fetcher")
     try:
-        result = asyncio.run(run_article_fetcher(max_items=20))
+        result = asyncio.run(run_article_fetcher(max_items=max_items))
         logger.info("scheduler_job_complete", job="article_fetcher", result=result)
     except Exception as e:
         logger.exception("scheduler_job_failed", job="article_fetcher", error=str(e))
@@ -132,6 +137,20 @@ def _job_article_topics():
         logger.exception("scheduler_job_failed", job="article_topics", error=str(e))
 
 
+def _job_reddit_trending():
+    """Scheduled job: Reddit trending pipeline (fetch subreddits → Mongo + Redis → LLM themes + Sahi)."""
+    from app.services.reddit_trending_service import run_reddit_trending_pipeline
+
+    if not get_config().get("reddit_trending", {}).get("enabled", False):
+        return
+    logger.info("scheduler_job_start", job="reddit_trending")
+    try:
+        result = asyncio.run(run_reddit_trending_pipeline())
+        logger.info("scheduler_job_complete", job="reddit_trending", result=result)
+    except Exception as e:
+        logger.exception("scheduler_job_failed", job="reddit_trending", error=str(e))
+
+
 def start_scheduler():
     """Start the ingestion scheduler if enabled in config."""
     global _scheduler
@@ -152,6 +171,8 @@ def start_scheduler():
     sentiment_min = sched_cfg.get("entity_mentions_sentiment_interval_minutes", 20)
     ai_summary_hours = sched_cfg.get("ai_summary_interval_hours", 24)
     article_topics_min = sched_cfg.get("article_topics_interval_minutes", 60)
+    reddit_trending_cfg = cfg.get("reddit_trending") or {}
+    reddit_trending_min = reddit_trending_cfg.get("fetch_interval_minutes", 45)
 
     _scheduler = BackgroundScheduler(daemon=True)
     _scheduler.add_job(_job_rss, "interval", hours=rss_hours, id="rss_ingestion")
@@ -164,6 +185,16 @@ def start_scheduler():
     _scheduler.add_job(_job_youtube, "interval", minutes=youtube_min, id="youtube_monitor")
     _scheduler.add_job(_job_crawler_enqueue, "interval", minutes=crawler_min, id="crawler_enqueue")
     _scheduler.add_job(_job_forum_ingestion, "interval", minutes=forum_min, id="forum_ingestion")
+    if reddit_trending_cfg.get("enabled", False):
+        _scheduler.add_job(_job_reddit_trending, "interval", minutes=reddit_trending_min, id="reddit_trending")
+
+    # Run RSS once shortly after start so the queue gets new items without waiting 4h
+    _scheduler.add_job(
+        _job_rss,
+        "date",
+        run_date=datetime.now(timezone.utc) + timedelta(seconds=30),
+        id="rss_ingestion_startup",
+    )
 
     _scheduler.start()
     logger.info(

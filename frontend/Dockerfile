@@ -9,7 +9,9 @@ RUN npm install
 # Builder
 FROM base AS builder
 ARG BACKEND_URL=http://backend:8000
+ARG NEXT_PUBLIC_API_URL=
 ENV BACKEND_URL=$BACKEND_URL
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY frontend/ .

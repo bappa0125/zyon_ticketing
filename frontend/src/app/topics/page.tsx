@@ -5,11 +5,7 @@ import { TopicTable, TopicRow } from "@/components/TopicTable";
 import { TopicsBriefingCards } from "@/components/TopicsBriefingCards";
 import Link from "next/link";
 
-function getApiUrl(): string {
-  if (typeof window === "undefined")
-    return process.env.NEXT_PUBLIC_API_URL || "http://localhost/api";
-  return "/api";
-}
+import { getApiBase } from "@/lib/api";
 
 const RANGE_OPTIONS = [
   { value: "24h", label: "24h" },
@@ -35,7 +31,7 @@ export default function TopicsPage() {
   useEffect(() => {
     async function fetchClients() {
       try {
-        const res = await fetch(`${getApiUrl()}/clients`);
+        const res = await fetch(`${getApiBase()}/clients`);
         if (!res.ok) return;
         const json = await res.json();
         const list = json.clients ?? [];
@@ -54,7 +50,7 @@ export default function TopicsPage() {
         const params = new URLSearchParams();
         params.set("range_param", range);
         if (clientFilter.trim()) params.set("client", clientFilter.trim());
-        const url = `${getApiUrl()}/topics?${params.toString()}`;
+        const url = `${getApiBase()}/topics?${params.toString()}`;
         const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data: TopicsResponse = await res.json();
@@ -97,7 +93,7 @@ export default function TopicsPage() {
   const displayClient = responseMeta.client ?? "All";
 
   return (
-    <div className="min-h-screen bg-[var(--background)]">
+    <div className="app-page">
       <div className="max-w-6xl mx-auto p-6">
         <div className="flex items-center gap-4 mb-4">
           <Link href="/" className="text-sm text-zinc-400 hover:text-zinc-200">

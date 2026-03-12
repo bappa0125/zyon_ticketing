@@ -11,29 +11,18 @@ interface TopPublicationsListProps {
 }
 
 export function TopPublicationsList({ items, loading }: TopPublicationsListProps) {
-  if (loading) {
-    return (
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-4 text-zinc-500 text-sm">
-        Loading…
-      </div>
-    );
-  }
-  if (!items.length) {
-    return (
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-4 text-zinc-500 text-sm">
-        No publications in this period
-      </div>
-    );
-  }
+  const panelClass = "rounded-2xl border border-[var(--ai-border)] bg-[var(--ai-surface)] p-4 text-sm text-[var(--ai-muted)]";
+  if (loading) return <div className={panelClass}>Loading…</div>;
+  if (!items.length) return <div className={panelClass}>No publications in this period</div>;
 
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-4">
-      <h3 className="text-sm font-medium text-zinc-300 mb-3">Top publications</h3>
+    <div className="rounded-2xl border border-[var(--ai-border)] bg-[var(--ai-surface)] p-4">
+      <h3 className="text-sm font-semibold text-[var(--ai-text)] mb-3">Top publications</h3>
       <ul className="space-y-2">
         {items.map((p, i) => (
           <li key={i} className="flex justify-between text-sm">
-            <span className="text-zinc-300 truncate pr-2">{p.source || "Unknown"}</span>
-            <span className="text-zinc-500 shrink-0">{p.mentions} mentions</span>
+            <span className="text-[var(--ai-text)] truncate pr-2">{p.source || "Unknown"}</span>
+            <span className="text-[var(--ai-muted)] shrink-0">{p.mentions} mentions</span>
           </li>
         ))}
       </ul>

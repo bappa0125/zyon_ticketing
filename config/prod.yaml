@@ -54,3 +54,15 @@ openrouter:
 embedding:
   model: sentence-transformers/all-MiniLM-L6-v2
   dimension: 384
+
+# AI brief (PR recommendations) - guarded to stay under free tier
+reports_ai:
+  ai_brief_enabled: true
+  ai_brief_model: ${OPENROUTER_MODEL:-openai/gpt-3.5-turbo}
+  ai_brief_max_tokens: 350
+  ai_brief_max_per_day: 10
+  ai_brief_ttl_hours_24h: 6
+  ai_brief_ttl_hours_7d: 24
+  ai_brief_ttl_hours_30d: 48
+  ai_brief_max_topics: 12
+  ai_brief_max_headlines: 20

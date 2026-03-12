@@ -5,15 +5,29 @@ const config: Config = {
     "./src/pages/**/*.{js,ts,jsx,tsx,mdx}",
     "./src/components/**/*.{js,ts,jsx,tsx,mdx}",
     "./src/app/**/*.{js,ts,jsx,tsx,mdx}",
+    "./src/config/**/*.{js,ts,jsx,tsx,mdx}",
   ],
   theme: {
     extend: {
       colors: {
-        surface: "#0f0f0f",
-        surfaceHover: "#1a1a1a",
-        border: "#2a2a2a",
-        text: "#ededed",
-        muted: "#a0a0a0",
+        ai: {
+          bg: "var(--ai-bg)",
+          surface: "var(--ai-surface)",
+          border: "var(--ai-border)",
+          text: "var(--ai-text)",
+          muted: "var(--ai-muted)",
+          accent: "var(--ai-accent)",
+        },
+      },
+      maxWidth: {
+        content: "var(--ai-max-content)",
+      },
+      fontFamily: {
+        sans: ["var(--font-sans)", "system-ui", "sans-serif"],
+      },
+      animation: {
+        "fade-in": "ai-fade-in 0.4s ease-out forwards",
+        "slide-in": "ai-slide-in-right 0.35s ease-out forwards",
       },
     },
   },

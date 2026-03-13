@@ -18,6 +18,7 @@ This document lists every pipeline that **writes** data into MongoDB: pipeline n
 | 8. Media index (crawl + index) | `media_articles`, Qdrant | `index_scheduler.run_index_cycle()` → `article_indexer.index_articles()` |
 | 9. Crawler snapshots / competitors | `web_snapshots`, `competitors` | Crawler / competitor flows using `snapshot_store.py` |
 | 10. Crawler alerts | `alerts` | Crawler using `crawler/alert_store.py` |
+| 11. YouTube narrative | `youtube_narrative_videos`, `youtube_narrative_summaries` | Scheduler (daily 8:00 UTC) or `POST /api/social/youtube-narrative/refresh` |
 
 *Chat and app data (conversations, messages) are written by `app/services/mongodb.py` and are not ingestion pipelines.*
 
@@ -97,6 +98,47 @@ This document lists every pipeline that **writes** data into MongoDB: pipeline n
 **Trigger:** Call `run_youtube_monitor()` on a schedule.
 
 **Responsible for:** YouTube mentions in `social_posts`.
+
+---
+
+## 5b. YouTube narrative (trading/finance daily) → `youtube_narrative_videos`, `youtube_narrative_summaries`
+
+**What it does:** Uses YouTube Data API v3 (no Apify, no comments) to fetch trading/finance videos by search. One LLM call synthesizes themes, narrative summary, sentiment. Daily snapshots stored in MongoDB for per-day tracking. Popularity from views/likes; sentiment from title + description.
+
+| File | Role |
+|------|------|
+| `backend/app/services/youtube_trending_service.py` | Fetch via search.list + videos.list; 1 LLM call; save to `youtube_narrative_videos` and `youtube_narrative_summaries`. |
+| `backend/app/api/social_api.py` | `GET /social/youtube-narrative` (read), `POST /social/youtube-narrative/refresh` (run pipeline). |
+
+**Config:** `youtube_trending` in config. Requires `YOUTUBE_API_KEY` (env or config). Quota: ~400 units/run (search + videos.list). LLM: 1 call/day (openrouter/free).
+
+**Trigger:** Scheduler daily at 8:00 UTC, or `POST /api/social/youtube-narrative/refresh`.
+
+**Collections:** `youtube_narrative_videos` (raw videos per date), `youtube_narrative_summaries` (one doc per date: narrative, themes, sentiment, top_channels, popularity_score).
+
+---
+
+## 5c. Narrative shift intelligence
+
+**What it does:** Uses YouTube + Reddit APIs + news from DB, clusters content (KMeans + sentence-transformers), LLM summaries per cluster. Outputs narrative themes, platform distribution, influencers. No scheduled job—run manually via backfill script.
+
+**Scripts:** `python scripts/run_narrative_shift_backfill.py` (inside backend container). API: `GET /api/social/narrative-shift`.
+
+---
+
+## 5d. Narrative intelligence daily → `narrative_intelligence_daily`
+
+**What it does:** 1 LLM synthesis call/day over narrative shift + Reddit themes + YouTube summaries. Produces executive summary, top narratives, PR actions, influencers, sentiment. Stored in `narrative_intelligence_daily` (last 7 days in UI).
+
+| File | Role |
+|------|------|
+| `backend/app/services/narrative_intelligence_daily_service.py` | `run_daily_synthesis()` reads narrative_shift, Reddit themes, YouTube summaries; 1 LLM call; saves to `narrative_intelligence_daily`. |
+| `backend/app/api/social_api.py` | `GET /api/social/narrative-intelligence-daily?days=7` |
+| `backend/scripts/run_narrative_intelligence_backfill.py` | Runs narrative shift backfill + daily synthesis (full flow). |
+
+**Trigger:** Scheduler daily at 9:00 UTC, or `docker compose exec backend python scripts/run_narrative_intelligence_backfill.py`. **Generate Report** button on Narrative Shift page downloads a client-ready HTML report.
+
+**Config:** `narrative_intelligence_daily.enabled`, `narrative_intelligence_daily.llm.model` (dev.yaml, prod.yaml).
 
 ---
 
@@ -209,6 +251,8 @@ The backend runs an in-process ingestion scheduler when `scheduler.enabled: true
 | Reddit monitor | `reddit_interval_minutes` (default 120) | `social_posts` |
 | YouTube monitor | `youtube_interval_minutes` (default 120) | `social_posts` |
 | Crawler enqueue | `crawler_enqueue_interval_minutes` (default 30) | Enqueues `crawl_website` jobs to Redis |
+| YouTube narrative (cron) | Daily 08:00 UTC | `youtube_narrative_videos`, `youtube_narrative_summaries` |
+| Narrative intelligence daily (cron) | Daily 09:00 UTC | `narrative_intelligence_daily` |
 
 Config keys: `scheduler.enabled`, `scheduler.rss_interval_hours`, `scheduler.article_fetcher_interval_minutes`, `scheduler.entity_mentions_interval_minutes`, `scheduler.reddit_interval_minutes`, `scheduler.youtube_interval_minutes`, `scheduler.crawler_enqueue_interval_minutes`. Set `scheduler.enabled: false` to disable.
 
@@ -226,6 +270,25 @@ Config keys: `scheduler.enabled`, `scheduler.rss_interval_hours`, `scheduler.art
 | `run_youtube_monitor()` | YouTube mentions | `social_posts` |
 | `run_social_monitor()` | Apify social mentions | `social_posts` |
 | `run_index_cycle()` (media_index) | Crawl + index (media_index path) | `media_articles`, Qdrant |
+| `docker compose exec backend python scripts/run_narrative_shift_backfill.py` | Narrative shift (YouTube+Reddit+news clustering) | (in-memory, served via API) |
+| `docker compose exec backend python scripts/run_narrative_intelligence_backfill.py` | Narrative shift + daily synthesis | `narrative_intelligence_daily` |
+| **`docker compose exec backend python scripts/run_master_backfill.py`** | **All ingestion jobs in dependency order** | All collections above |
+
+### Master backfill (daily morning run)
+
+Use `run_master_backfill.py` to run every scheduled ingestion job in one go. Recommended for a daily morning catch-up.
+
+```bash
+# From project root with Docker
+docker compose exec backend python scripts/run_master_backfill.py
+```
+
+- **Dependencies:** Runs in correct order (RSS → article fetcher → entity mentions → sentiment/topics → AI summary, etc.).
+- **Deduplication:** Each service handles its own (URL dedup, date-based upserts).
+- **Continue on error:** By default, one failing job does not stop the rest. Use `--strict` to exit on first failure.
+- **Skip phases:** `--skip narrative --skip youtube` to omit narrative pipelines or YouTube narrative.
+- **Dry run:** `--dry-run` shows what would run without executing.
+- **Scheduler paused during backfill:** While the master backfill runs, it sets a Redis lock (`ingestion:backfill_running`). The in-process ingestion scheduler checks this before each job and skips the run if the lock is set, so scheduled jobs do not overlap with the backfill. The lock is cleared when the script exits (or after 2h TTL if the script crashes).
 
 ### Removing fake/placeholder mentions
 

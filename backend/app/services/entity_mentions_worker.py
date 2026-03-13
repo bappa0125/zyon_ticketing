@@ -139,6 +139,9 @@ async def run_entity_mentions_pipeline(batch_size: int = BATCH_SIZE, newest_firs
                     "type": mention_type,
                     "content_quality": content_quality,
                 }
+                author = (doc.get("author") or "").strip()[:300] if isinstance(doc.get("author"), str) else ""
+                if author:
+                    mention_doc["author"] = author
                 await mentions_coll.insert_one(mention_doc)
                 inserted += 1
                 logger.info(

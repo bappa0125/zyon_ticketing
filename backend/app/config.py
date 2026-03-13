@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     hf_token: str = Field(default="", alias="HF_TOKEN")
     mock_llm: bool = Field(default=False, alias="MOCK_LLM")
     apify_api_key: str = Field(default="", alias="APIFY_API_KEY")
+    youtube_api_key: str = Field(default="", alias="YOUTUBE_API_KEY")
 
     class Config:
         env_file = ".env"
@@ -72,5 +73,8 @@ def get_config() -> dict[str, Any]:
         "chat": base.get("chat", {}),
         "scheduler": base.get("scheduler", {}),
         "reddit_trending": base.get("reddit_trending", {}),
+        "youtube_trending": base.get("youtube_trending") if isinstance(base.get("youtube_trending"), dict) else {},
+        "narrative_shift": base.get("narrative_shift") if isinstance(base.get("narrative_shift"), dict) else {},
+        "narrative_intelligence_daily": base.get("narrative_intelligence_daily") if isinstance(base.get("narrative_intelligence_daily"), dict) else {},
         "settings": settings,
     }

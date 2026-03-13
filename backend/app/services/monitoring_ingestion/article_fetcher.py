@@ -1,12 +1,14 @@
 """Article Fetcher — fetch article pages and extract readable text. STEP 5.
 No entity detection. Updates rss_items status; stores in article_documents."""
 import hashlib
+import re
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
 import trafilatura
+from bs4 import BeautifulSoup
 
 from app.core.logging import get_logger
 
@@ -63,8 +65,94 @@ def _source_domain_from_url(url: str) -> str:
     return netloc[:200]
 
 
-def _fetch_and_extract(url: str) -> tuple[str | None, int, str, str]:
-    """Fetch URL (follow redirects), extract article text. Returns (text, length, url_original, url_resolved)."""
+def _extract_author_from_byline(html: str) -> str | None:
+    """Fallback: parse HTML for author/byline when trafilatura metadata has none.
+    Handles LiveMint-style author links, rel=author, meta tags, and 'By X' patterns."""
+    if not html or not html.strip():
+        return None
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+    except Exception:
+        return None
+
+    candidates: list[str] = []
+
+    # 1. Links to /authors/ or /author/ (LiveMint, many news sites)
+    for a in soup.find_all("a", href=True):
+        href = (a.get("href") or "").lower()
+        if "/authors/" in href or re.search(r"/author/[^/]+/?$", href):
+            text = (a.get_text(strip=True) or "").strip()
+            if text and len(text) <= 120 and not any(c in text for c in ["http", "www.", ".com"]):
+                candidates.append(text)
+                break  # first author link wins
+    if candidates:
+        return _sanitize_author(candidates[0])
+
+    # 2. link rel="author"
+    for link in soup.find_all("link", rel=True):
+        rel = (link.get("rel") or [])
+        if isinstance(rel, str):
+            rel = [rel]
+        if "author" in [r.lower() for r in rel]:
+            title = (link.get("title") or "").strip()
+            if title and len(title) <= 120:
+                return _sanitize_author(title)
+
+    # 3. Meta tags (article:author, author)
+    for meta in soup.find_all("meta", attrs={"content": True}):
+        name = (meta.get("name") or meta.get("property") or "").lower()
+        if name in ("author", "article:author", "og:article:author"):
+            content = (meta.get("content") or "").strip()
+            if content and len(content) <= 120:
+                return _sanitize_author(content)
+
+    # 4. Regex: "By X", "Written by X", "Reported by X" in first 4000 chars (byline usually near top)
+    head = html[:4000]
+    for pattern in [
+        r"(?:By|Written by|Reported by|Authored by)\s+([A-Za-z][A-Za-z\s\-\.']{2,80}?)(?:\s*[,\|]|\s*</|$)",
+        r">([A-Za-z][A-Za-z\s\-\.']{2,60})\s*[,\|]\s*(?:Staff Writer|Correspondent|Reporter)",
+    ]:
+        m = re.search(pattern, head, re.IGNORECASE | re.DOTALL)
+        if m:
+            name = m.group(1).strip()
+            if 3 <= len(name) <= 100 and not re.search(r"\d|http|@|\.(com|org)", name):
+                return _sanitize_author(name)
+
+    return None
+
+
+def _extract_author_newspaper3k(html: str) -> str | None:
+    """Fallback: use newspaper3k to extract author from HTML. Uses same HTML, no re-fetch."""
+    if not html or not html.strip():
+        return None
+    try:
+        from newspaper import Article
+        article = Article("https://example.com/article")
+        article.download(input_html=html)
+        article.parse()
+        authors = getattr(article, "authors", None) or []
+        if authors and isinstance(authors, (list, tuple)):
+            first = (authors[0] or "").strip()
+            if first and len(first) <= 300:
+                return _sanitize_author(first)
+    except Exception:
+        pass
+    return None
+
+
+def _sanitize_author(s: str) -> str:
+    """Clean author string for storage."""
+    s = (s or "").strip()
+    # Remove "Updated:", "Edited:", trailing role suffixes if too long
+    for prefix in ("Updated:", "Edited:", "Last updated:"):
+        if s.lower().startswith(prefix.lower()):
+            s = s[len(prefix) :].strip()
+    s = re.sub(r"\s+", " ", s)[:300]
+    return s if s else ""
+
+
+def _fetch_and_extract(url: str) -> tuple[str | None, int, str, str, str | None]:
+    """Fetch URL (follow redirects), extract article text and author. Returns (text, length, url_original, url_resolved, author)."""
     url_original = (url or "").strip()[:2000]
     try:
         with httpx.Client(timeout=HTTP_TIMEOUT, follow_redirects=True, headers={"User-Agent": USER_AGENT}) as client:
@@ -74,11 +162,25 @@ def _fetch_and_extract(url: str) -> tuple[str | None, int, str, str]:
             url_resolved = str(resp.url)[:2000]
     except Exception as e:
         logger.warning("article_fetcher_http_failed", url=url_original[:100], error=str(e))
-        return None, 0, url_original, url_original
+        return None, 0, url_original, url_original, None
+    author: str | None = None
+    try:
+        from trafilatura import extract_metadata
+        meta = extract_metadata(html)
+        if meta and getattr(meta, "author", None) and isinstance(meta.author, str) and meta.author.strip():
+            author = meta.author.strip()[:300]
+    except Exception:
+        pass
+    if not author:
+        byline_author = _extract_author_from_byline(html)
+        if byline_author:
+            author = byline_author
+    if not author:
+        author = _extract_author_newspaper3k(html)
     text = trafilatura.extract(html, include_comments=False, include_tables=False)
     if not text or not text.strip():
-        return None, 0, url_original, url_resolved
-    return text.strip(), len(text), url_original, url_resolved
+        return None, 0, url_original, url_resolved, author
+    return text.strip(), len(text), url_original, url_resolved, author
 
 
 async def run_article_fetcher(max_items: int = MAX_BATCH) -> dict[str, Any]:
@@ -129,7 +231,9 @@ async def run_article_fetcher(max_items: int = MAX_BATCH) -> dict[str, Any]:
             await rss_coll.update_one({"_id": item["_id"]}, {"$set": {"status": STATUS_FAILED}})
             failures += 1
             continue
-        article_text, article_length, url_original, url_resolved = _fetch_and_extract(url)
+        article_text, article_length, url_original, url_resolved, page_author = _fetch_and_extract(url)
+        rss_author = (item.get("author") or "").strip()[:300] if isinstance(item.get("author"), str) else ""
+        author = (page_author or rss_author) or None
         if article_text is None:
             # Workaround: store metadata-only article so we don't lose the article; entity_mentions_worker will create snippet mentions
             url_for_hash = url_resolved or url_original
@@ -167,6 +271,8 @@ async def run_article_fetcher(max_items: int = MAX_BATCH) -> dict[str, Any]:
                     "entities": entities,
                     "summary": summary,
                 }
+                if author:
+                    doc["author"] = author
                 try:
                     await article_coll.insert_one(doc)
                     await rss_coll.update_one({"_id": item["_id"]}, {"$set": {"status": STATUS_PROCESSED}})
@@ -221,6 +327,8 @@ async def run_article_fetcher(max_items: int = MAX_BATCH) -> dict[str, Any]:
             "entities": entities,
             "summary": (item.get("summary") or "").strip()[:5000],
         }
+        if author:
+            doc["author"] = author
         try:
             await article_coll.insert_one(doc)
         except Exception as e:

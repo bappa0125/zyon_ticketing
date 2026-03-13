@@ -36,7 +36,13 @@ const NAV_STRUCTURE: (NavLink | NavGroup)[] = [
     ],
   },
   { href: "/clients", label: "Clients" },
-  { href: "/social", label: "Social" },
+  {
+    label: "Social",
+    items: [
+      { href: "/social", label: "Social" },
+      { href: "/social/narrative-shift", label: "Narrative Shift" },
+    ],
+  },
 ];
 
 function isGroup(item: NavLink | NavGroup): item is NavGroup {

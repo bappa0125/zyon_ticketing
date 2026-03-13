@@ -99,3 +99,41 @@ reddit_trending:
     max_tokens_themes: 400
     max_tokens_sahi: 400
   fetch_interval_minutes: 45
+
+# YouTube narrative pipeline (daily, YouTube Data API v3, 1 LLM call)
+youtube_trending:
+  enabled: true
+  api_key: ""  # Set YOUTUBE_API_KEY env
+  search_queries:
+    - stock market trading
+    - options trading
+    - commodity market
+    - finance news India
+  max_videos_per_query: 12
+  delay_seconds_between_searches: 1.0
+  mongodb:
+    database: chat
+    videos_collection: youtube_narrative_videos
+    summaries_collection: youtube_narrative_summaries
+  llm:
+    model: openrouter/free
+    max_tokens: 800
+
+narrative_shift:
+  enabled: true
+  youtube_queries:
+    - stock market
+    - options trading
+    - commodity
+  reddit_subreddits:
+    - stocks
+    - investing
+    - IndianStreetBets
+    - wallstreetbets
+  llm:
+    model: openrouter/free
+
+narrative_intelligence_daily:
+  enabled: true
+  llm:
+    model: openrouter/free

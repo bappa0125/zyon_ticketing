@@ -10,9 +10,10 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
-from app.services.media_intelligence_service import get_dashboard
+from app.services.media_intelligence_service import get_dashboard, get_mention_counts, get_articles_for_entity
 from app.services.topics_service import get_topics_analytics
 from app.services.mongodb import get_mongo_client
+from app.services.ai_brief_service import get_ai_brief_from_db, save_ai_brief_to_db
 from app.config import get_config
 from app.services.llm_gateway import LLMGateway
 from app.services.redis_client import get_redis
@@ -253,13 +254,32 @@ async def _llm_generate_ai_brief(payload: dict[str, Any]) -> dict[str, Any]:
         }
 
 
+@router.get("/reports/ai-brief")
+async def reports_ai_brief_get(
+    client: str = Query(..., description="Client name"),
+    range_param: str = Query("7d", alias="range", description="24h | 7d | 30d"),
+):
+    """
+    Return latest AI brief from DB for client+range.
+    Shown in Pulse AI PR brief table. Generated daily or on POST refresh.
+    """
+    client = (client or "").strip()
+    range_param = (range_param or "7d").strip()
+    if not client:
+        raise HTTPException(status_code=400, detail="client required")
+    if range_param not in ("24h", "7d", "30d"):
+        range_param = "7d"
+    doc = await get_ai_brief_from_db(client=client, range_param=range_param)
+    if not doc:
+        return {"brief": None, "generated_at": None, "client": client, "range": range_param}
+    return {"brief": doc.get("brief"), "generated_at": doc.get("generated_at"), "client": doc.get("client"), "range": doc.get("range")}
+
+
 @router.post("/reports/ai-brief")
 async def reports_ai_brief(req: AIBriefRequest):
     """
-    Generate (or return cached) AI PR brief. Guardrails:
-    - Explicit call only (never auto-run from UI)
-    - Redis cache with TTL by range
-    - Daily quota enforced via Redis counter
+    Generate AI PR brief (LLM call), store in DB, return result.
+    Used for manual refresh. Daily job also runs generation.
     """
     client = (req.client or "").strip()
     range_param = (req.range or "7d").strip()
@@ -273,45 +293,49 @@ async def reports_ai_brief(req: AIBriefRequest):
         raise HTTPException(status_code=403, detail="AI brief disabled")
 
     try:
-        ttl_seconds, max_per_day = _ai_limits(range_param)
-        bucket = _cache_bucket(range_param)
-        cache_key = f"{AI_BRIEF_CACHE_PREFIX}:{client}:{range_param}:{bucket}"
-
-        r = await get_redis()
-        cached = await r.get(cache_key)
-        if cached:
-            try:
-                obj = json.loads(cached)
-            except Exception:
-                obj = {"_raw": cached}
-            return {"cached": True, "cache_key": cache_key, "generated_at": obj.get("generated_at"), "brief": obj.get("brief") or obj}
-
-        # Quota gate (only when cache miss)
-        day_key = f"{AI_BRIEF_DAILY_COUNT_KEY_PREFIX}:{_today_key()}"
-        count = await r.incr(day_key)
-        if count == 1:
-            await r.expire(day_key, 60 * 60 * 48)  # keep for 2 days
-        if count > max_per_day:
-            raise HTTPException(status_code=429, detail=f"Daily AI brief limit reached ({max_per_day}/day). Try later or use cached briefs.")
-
         payload = await _build_ai_brief_payload(client=client, range_param=range_param)
         brief = await _llm_generate_ai_brief(payload)
-        wrapped = {
+        inputs = {"topics_n": len(payload.get("topics") or []), "headlines_n": len(payload.get("headlines") or [])}
+        await save_ai_brief_to_db(client=client, range_param=range_param, brief=brief, inputs=inputs)
+        return {
+            "cached": False,
             "generated_at": _fmt_dt(datetime.now(timezone.utc)),
             "client": payload.get("client") or client,
             "range": range_param,
             "brief": brief,
-            "inputs": {
-                "topics_n": len(payload.get("topics") or []),
-                "headlines_n": len(payload.get("headlines") or []),
-            },
+            "inputs": inputs,
         }
-        await r.setex(cache_key, ttl_seconds, json.dumps(_json_safe(wrapped), ensure_ascii=False))
-        return {"cached": False, "cache_key": cache_key, **wrapped}
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI brief failed: {e!s}")
+
+
+async def run_ai_brief_daily() -> dict[str, int]:
+    """Generate AI brief for each client (7d range), store in DB. Call from scheduler."""
+    from app.core.client_config_loader import load_clients
+
+    clients = await load_clients()
+    if not clients:
+        return {"generated": 0, "errors": 0}
+    generated = 0
+    errors = 0
+    for c in clients:
+        client_name = (c.get("name") or "").strip()
+        if not client_name:
+            continue
+        try:
+            payload = await _build_ai_brief_payload(client=client_name, range_param="7d")
+            brief = await _llm_generate_ai_brief(payload)
+            inputs = {"topics_n": len(payload.get("topics") or []), "headlines_n": len(payload.get("headlines") or [])}
+            await save_ai_brief_to_db(client=client_name, range_param="7d", brief=brief, inputs=inputs)
+            generated += 1
+        except Exception as e:
+            errors += 1
+            from app.core.logging import get_logger
+            get_logger(__name__).warning("ai_brief_daily_failed", client=client_name, error=str(e))
+    return {"generated": generated, "errors": errors}
+
 
 def _render_pulse_html(*, client: str, range_param: str, dashboard: dict[str, Any], topics: list[dict[str, Any]]) -> str:
     now = _fmt_dt(datetime.now(timezone.utc))
@@ -478,13 +502,38 @@ async def report_pulse_json(
     range_param: str = Query("7d", alias="range", description="24h | 7d | 30d"),
 ):
     dashboard = await get_dashboard(client=client, range_param=range_param)
+    counts = await get_mention_counts(client=client, range_param=range_param)
     topics_data = await get_topics_analytics(client=client, range_param=range_param)
     return {
         "client": client,
         "range": range_param,
         "dashboard": dashboard,
+        "total_mentions": counts.get("total_mentions", 0),
+        "entity_counts": counts.get("entity_counts") or {},
         "topics": topics_data.get("topics") or [],
     }
+
+
+@router.get("/reports/pulse/articles")
+async def report_pulse_articles(
+    client: str = Query(..., description="Primary client name, e.g. Sahi"),
+    range_param: str = Query("7d", alias="range", description="24h | 7d | 30d"),
+    entity: str | None = Query(None, description="Entity name (client or competitor). Defaults to client."),
+    page: int = Query(1, ge=1, description="Page number (1-based)."),
+    page_size: int = Query(25, ge=1, le=100, description="Page size (max 100)."),
+):
+    """
+    Paginated list of articles/mentions for a specific entity in the Pulse range.
+    Does not call any LLM; reuses existing summaries/snippets.
+    """
+    data = await get_articles_for_entity(
+        client=client,
+        range_param=range_param,
+        entity=entity,
+        page=page,
+        page_size=page_size,
+    )
+    return data
 
 
 @router.get("/reports/pulse.html", response_class=HTMLResponse)

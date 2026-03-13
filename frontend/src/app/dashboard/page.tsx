@@ -6,8 +6,23 @@ import { ShareOfVoiceDonut } from "@/components/MediaIntelligence/ShareOfVoiceDo
 import { MentionsPerDayChart, type TimelineRow } from "@/components/MediaIntelligence/MentionsPerDayChart";
 import { RankedSourcesTable, type RankedSourceRow } from "@/components/MediaIntelligence/RankedSourcesTable";
 import { TopPublicationsList, type PubRow } from "@/components/MediaIntelligence/TopPublicationsList";
-import { TopicTable, type TopicRow } from "@/components/TopicTable";
 import { getApiBase } from "@/lib/api";
+
+function formatDate(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
+}
 
 const RANGE_OPTIONS = [
   { value: "24h", label: "24h" },
@@ -20,6 +35,8 @@ type RangeValue = (typeof RANGE_OPTIONS)[number]["value"];
 interface PulseResponse {
   client: string;
   range: string;
+  total_mentions?: number;
+  entity_counts?: Record<string, number>;
   dashboard: {
     client: string;
     competitors: string[];
@@ -29,7 +46,31 @@ interface PulseResponse {
     top_publications: PubRow[];
     by_domain?: RankedSourceRow[];
   };
-  topics: TopicRow[];
+  topics: unknown[];
+}
+
+interface PulseArticlesRow {
+  id: string;
+  entity: string;
+  title: string;
+  summary: string;
+  link: string;
+  source: string;
+  source_domain: string;
+  journalist: string | null;
+  published_at: string;
+  sentiment?: string | null;
+}
+
+interface PulseArticlesResponse {
+  client: string;
+  competitors: string[];
+  entity: string;
+  range: string;
+  total_articles: number;
+  page: number;
+  page_size: number;
+  rows: PulseArticlesRow[];
 }
 
 interface AIBriefResponse {
@@ -57,6 +98,11 @@ export default function DashboardPage() {
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState<string>("");
   const [aiBrief, setAiBrief] = useState<AIBriefResponse | null>(null);
+  const [articles, setArticles] = useState<PulseArticlesRow[]>([]);
+  const [articlesTotal, setArticlesTotal] = useState(0);
+  const [articlesPage, setArticlesPage] = useState(1);
+  const [articlesLoading, setArticlesLoading] = useState(false);
+  const [selectedEntity, setSelectedEntity] = useState<string>("");
 
   useEffect(() => {
     (async () => {
@@ -90,9 +136,36 @@ export default function DashboardPage() {
   }, [client, range]);
 
   useEffect(() => {
-    // Reset AI brief when filters change (avoid confusing mismatched briefs)
-    setAiBrief(null);
+    if (!client.trim()) {
+      setAiBrief(null);
+      setAiError("");
+      return;
+    }
+    let cancelled = false;
     setAiError("");
+    (async () => {
+      try {
+        const params = new URLSearchParams({ client: client.trim(), range });
+        const res = await fetch(`${getApiBase()}/reports/ai-brief?${params.toString()}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (!cancelled && data.brief) {
+          setAiBrief({
+            cached: true,
+            generated_at: data.generated_at,
+            brief: data.brief,
+          });
+        } else if (!cancelled) {
+          setAiBrief(null);
+        }
+      } catch (e) {
+        if (!cancelled) setAiError(e instanceof Error ? e.message : "Failed to load");
+        if (!cancelled) setAiBrief(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [client, range]);
 
   useEffect(() => {
@@ -133,8 +206,63 @@ export default function DashboardPage() {
     [dashboard]
   );
   const pubs = dashboard?.top_publications ?? [];
-  const topics = pulse?.topics ?? [];
-  const totalMentions = coverage.reduce((s, c) => s + (c.mentions || 0), 0);
+  const totalMentions =
+    pulse?.total_mentions ?? coverage.reduce((s, c) => s + (c.mentions || 0), 0);
+
+  // Sync selected entity when dashboard/entities change
+  useEffect(() => {
+    if (!dashboard?.client) return;
+    // Keep current selection if still valid
+    if (selectedEntity && entities.includes(selectedEntity)) {
+      return;
+    }
+    // Default to client
+    if (entities.length > 0) {
+      setSelectedEntity(entities[0]);
+      setArticlesPage(1);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dashboard, entities]);
+
+  // Load articles for selected entity
+  useEffect(() => {
+    if (!client.trim() || !selectedEntity) {
+      setArticles([]);
+      setArticlesTotal(0);
+      return;
+    }
+    let cancelled = false;
+    setArticlesLoading(true);
+    (async () => {
+      try {
+        const params = new URLSearchParams({
+          client: client.trim(),
+          range,
+          entity: selectedEntity,
+          page: String(articlesPage),
+          page_size: "25",
+        });
+        const res = await fetch(`${getApiBase()}/reports/pulse/articles?${params.toString()}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = (await res.json()) as PulseArticlesResponse;
+        if (!cancelled) {
+          setArticles(data.rows || []);
+          setArticlesTotal(data.total_articles || 0);
+        }
+      } catch (e) {
+        console.error(e);
+        if (!cancelled) {
+          setArticles([]);
+          setArticlesTotal(0);
+        }
+      } finally {
+        if (!cancelled) setArticlesLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [client, range, selectedEntity, articlesPage]);
 
   return (
     <div className="app-page">
@@ -245,13 +373,130 @@ export default function DashboardPage() {
                 />
                 <TopPublicationsList items={pubs} loading={loading} />
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="app-card p-4 md:col-span-2">
-                  <h3 className="text-sm font-semibold text-[var(--mw-text)] mb-3">Trending topics</h3>
-                  <p className="text-xs text-[var(--mw-muted)] mb-3">
-                    Talk / Careful / Avoid comes from sentiment mix of mentions.
-                  </p>
-                  <TopicTable topics={topics} loading={loading} clientName={dashboard?.client ?? ""} />
+              <div className="mt-4 grid grid-cols-1">
+                <div className="app-card p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+                    <div>
+                      <h3 className="text-sm font-semibold text-[var(--mw-text)]">Articles by entity</h3>
+                      <p className="text-xs text-[var(--mw-muted)] mt-1">
+                        Titles, sources and summaries for mentions in this period.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-[var(--mw-muted)]">Entity</label>
+                      <select
+                        value={selectedEntity}
+                        onChange={(e) => {
+                          setSelectedEntity(e.target.value);
+                          setArticlesPage(1);
+                        }}
+                        className="app-select"
+                      >
+                        {entities.map((e) => (
+                          <option key={e} value={e}>
+                            {e === dashboard?.client ? `${e} (client)` : e}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  {articlesLoading ? (
+                    <div className="text-sm text-[var(--mw-muted)]">Loading articles…</div>
+                  ) : !articles.length ? (
+                    <div className="text-sm text-[var(--mw-muted)]">
+                      No articles found for this entity in the selected period.
+                    </div>
+                  ) : (
+                    <>
+                      <div className="overflow-x-auto rounded-xl border border-[var(--mw-border)]">
+                        <table className="min-w-full divide-y divide-[var(--mw-border)] text-sm">
+                          <thead className="bg-[var(--mw-surface-2)]">
+                            <tr>
+                              <th className="px-3 py-2 text-left text-xs font-medium text-[var(--mw-muted)] uppercase tracking-wider">
+                                Title
+                              </th>
+                              <th className="px-3 py-2 text-left text-xs font-medium text-[var(--mw-muted)] uppercase tracking-wider">
+                                Source
+                              </th>
+                              <th className="px-3 py-2 text-left text-xs font-medium text-[var(--mw-muted)] uppercase tracking-wider">
+                                Journalist
+                              </th>
+                              <th className="px-3 py-2 text-left text-xs font-medium text-[var(--mw-muted)] uppercase tracking-wider">
+                                Summary
+                              </th>
+                              <th className="px-3 py-2 text-right text-xs font-medium text-[var(--mw-muted)] uppercase tracking-wider">
+                                Date
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-[var(--mw-border)]">
+                            {articles.map((row) => (
+                              <tr key={row.id} className="hover:bg-[var(--mw-surface-2)]/70">
+                                <td className="px-3 py-2 align-top">
+                                  {row.link ? (
+                                    <a
+                                      href={row.link}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="text-sm text-[var(--mw-primary)] hover:underline font-medium"
+                                    >
+                                      {row.title}
+                                    </a>
+                                  ) : (
+                                    <span className="text-sm text-[var(--mw-text)]">{row.title}</span>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2 align-top text-sm text-[var(--mw-text-secondary)]">
+                                  {row.source || row.source_domain || "—"}
+                                </td>
+                                <td className="px-3 py-2 align-top text-sm text-[var(--mw-text-secondary)]">
+                                  {row.journalist || "cannot be verified"}
+                                </td>
+                                <td className="px-3 py-2 align-top text-sm text-[var(--mw-text-secondary)]">
+                                  {row.summary || "—"}
+                                </td>
+                                <td className="px-3 py-2 align-top text-right text-xs text-[var(--mw-muted)] whitespace-nowrap">
+                                  {formatDate(row.published_at)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div className="mt-2 flex items-center justify-between text-xs text-[var(--mw-muted)]">
+                        <span>
+                          Showing {(articlesPage - 1) * 25 + 1}-
+                          {Math.min(articlesPage * 25, articlesTotal)} of {articlesTotal} articles
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            disabled={articlesPage <= 1}
+                            onClick={() => setArticlesPage((p) => Math.max(1, p - 1))}
+                            className={
+                              articlesPage <= 1
+                                ? "app-btn-secondary opacity-50 cursor-not-allowed"
+                                : "app-btn-secondary"
+                            }
+                          >
+                            Previous
+                          </button>
+                          <button
+                            type="button"
+                            disabled={articlesPage * 25 >= articlesTotal}
+                            onClick={() => setArticlesPage((p) => p + 1)}
+                            className={
+                              articlesPage * 25 >= articlesTotal
+                                ? "app-btn-secondary opacity-50 cursor-not-allowed"
+                                : "app-btn-secondary"
+                            }
+                          >
+                            Next
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             </section>
@@ -261,7 +506,7 @@ export default function DashboardPage() {
                 <div>
                   <h3 className="text-sm font-semibold text-[var(--mw-text)]">AI PR Brief (guarded)</h3>
                   <p className="text-xs text-[var(--mw-muted)] mt-1">
-                    Click to generate. Uses cache + daily quota to stay under free tier.
+                    Loaded from DB (generated daily). Use Refresh to regenerate now.
                   </p>
                 </div>
                 <button
@@ -293,7 +538,7 @@ export default function DashboardPage() {
                   }}
                   className={aiBusy ? "app-btn-secondary opacity-50 cursor-not-allowed" : "app-btn-primary"}
                 >
-                  {aiBusy ? "Generating…" : "Generate AI Brief"}
+                  {aiBusy ? "Generating…" : "Refresh brief"}
                 </button>
               </div>
 
@@ -305,7 +550,7 @@ export default function DashboardPage() {
 
               {!aiBrief && !aiBusy && !aiError && (
                 <div className="text-sm text-[var(--mw-muted)]">
-                  No AI brief generated yet for this client/range.
+                  No AI brief in DB yet. Run daily job or click Refresh to generate.
                 </div>
               )}
 

@@ -57,7 +57,15 @@ def _extract_entries(feed_url: str, source_domain: str, rss_feed: str) -> list[d
         published_at = _parse_published(entry)
         summary_raw = getattr(entry, "summary", None) or getattr(entry, "description", None)
         summary = (summary_raw or "").strip()[:5000] if summary_raw else ""
-        items.append({
+        author = ""
+        if getattr(entry, "author", None) and isinstance(entry.author, str):
+            author = (entry.author or "").strip()[:300]
+        elif hasattr(entry, "get") and entry.get("dc_creator"):
+            author = (str(entry.get("dc_creator") or "")).strip()[:300]
+        elif hasattr(entry, "authors") and entry.authors and len(entry.authors) > 0:
+            a = entry.authors[0]
+            author = (getattr(a, "name", None) or str(a) if a else "").strip()[:300]
+        item_data: dict[str, Any] = {
             "title": title[:1000],
             "url": url[:2000],
             "source_domain": source_domain,
@@ -66,7 +74,10 @@ def _extract_entries(feed_url: str, source_domain: str, rss_feed: str) -> list[d
             "rss_feed": rss_feed[:500],
             "status": DEFAULT_STATUS,
             "summary": summary,
-        })
+        }
+        if author:
+            item_data["author"] = author
+        items.append(item_data)
     return items
 
 

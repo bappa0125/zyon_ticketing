@@ -447,6 +447,36 @@ export const PAGE_HELP: Record<string, PageHelp> = {
       },
     ],
   },
+
+  "/social/narrative-shift": {
+    title: "Narrative Shift Intelligence",
+    summary: "Emerging narratives from YouTube, Reddit, and news (72h). Run backfill to populate.",
+    sections: [
+      {
+        sectionTitle: "Narrative Shift",
+        whatItIs: (
+          <p className={p}>
+            Detects narrative clusters from API-fetched content (YouTube, Reddit, news). Charts show engagement, platform distribution, top influencers; the table lists topics with pain points and recommended Sahi messaging.
+          </p>
+        ),
+        howToInterpret: (
+          <ul className={ul}>
+            <li><strong className={strong}>Narrative engagement</strong> — relative volume per cluster.</li>
+            <li><strong className={strong}>Platform distribution</strong> — share by source.</li>
+            <li><strong className={strong}>Sahi messaging</strong> — LLM-suggested talking points for the app.</li>
+          </ul>
+        ),
+        controls: [
+          { name: "Backfill script", howToUse: "Run: python backend/scripts/run_narrative_shift_backfill.py (in backend container) to populate data." },
+        ],
+        prAgencyUse: (
+          <p className={p + " " + muted}>
+            Use for weekly narrative briefs and content strategy. Messaging column suggests angles for Sahi.
+          </p>
+        ),
+      },
+    ],
+  },
 };
 
 export function getPageHelp(pathname: string): PageHelp | null {

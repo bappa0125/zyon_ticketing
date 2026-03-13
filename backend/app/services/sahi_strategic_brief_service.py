@@ -16,6 +16,7 @@ from app.services.topics_service import get_topics_analytics
 logger = get_logger(__name__)
 
 REDIS_KEY = "sahi_strategic_brief"
+COLLECTION = "strategic_briefs"
 CACHE_TTL = 3600  # 1 hour
 RANGE_PARAM = "7d"
 MAX_SUGGESTIONS = 2
@@ -198,40 +199,55 @@ async def _llm_strategic_call(
 
 async def get_sahi_strategic_brief(use_cache: bool = True) -> dict[str, Any]:
     """
-    Build context, run LLM, return 1–2 suggestions.
-    use_cache: if True, check Redis first and store result with TTL.
+    Return latest strategic brief from MongoDB. If missing, generate via LLM and store.
+    use_cache=True: read from DB; generate only if empty.
+    use_cache=False: force regenerate via LLM and store.
     """
-    from app.services.redis_client import get_redis
-    if use_cache:
-        try:
-            r = await get_redis()
-            raw = await r.get(REDIS_KEY)
-            if raw:
-                try:
-                    return json.loads(raw)
-                except Exception:
-                    pass
-        except Exception as e:
-            logger.debug("sahi_strategic_cache_get_failed", error=str(e))
-
-    themes = await _load_themes()
     primary_client = await _primary_client()
+    if use_cache:
+        await get_mongo_client()
+        db = get_db()
+        coll = db[COLLECTION]
+        doc = await coll.find_one(
+            {"client": primary_client},
+            sort=[("generated_at", -1)],
+            projection={"_id": 0},
+        )
+        if doc:
+            gen = doc.get("generated_at")
+            if hasattr(gen, "isoformat"):
+                doc = dict(doc)
+                doc["generated_at"] = gen.isoformat() if gen else None
+            return doc
+
+    await get_mongo_client()
+    db = get_db()
+    coll = db[COLLECTION]
+    themes = await _load_themes()
     sahi_summary = await _load_sahi_mentions_summary(primary_client)
     topics = await _load_topics(primary_client)
     competitors = await _load_competitors(primary_client)
     entity_counts = await _load_entity_mentions_counts(primary_client)
-
     suggestions = await _llm_strategic_call(themes, sahi_summary, topics, competitors, entity_counts)
     result = {
         "client": primary_client,
         "range": RANGE_PARAM,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(timezone.utc),
         "suggestions": suggestions,
     }
-    if use_cache:
-        try:
-            r = await get_redis()
-            await r.setex(REDIS_KEY, CACHE_TTL, json.dumps(result, ensure_ascii=False))
-        except Exception as e:
-            logger.debug("sahi_strategic_cache_set_failed", error=str(e))
-    return result
+    await coll.update_one(
+        {"client": primary_client},
+        {"$set": result},
+        upsert=True,
+    )
+    return {**result, "generated_at": result["generated_at"].isoformat()}
+
+
+async def run_sahi_strategic_brief_daily() -> dict[str, int]:
+    """Generate and store strategic brief. Call from scheduler."""
+    try:
+        await get_sahi_strategic_brief(use_cache=False)
+        return {"generated": 1, "errors": 0}
+    except Exception as e:
+        logger.warning("sahi_strategic_daily_failed", error=str(e))
+        return {"generated": 0, "errors": 1}

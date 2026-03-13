@@ -96,6 +96,52 @@ async def refresh_reddit_trending():
     return result
 
 
+# --- YouTube narrative (daily snapshots from DB) ---
+
+@router.get("/social/youtube-narrative")
+async def get_youtube_narrative(limit: int = 30):
+    """
+    Return YouTube narrative daily summaries from MongoDB.
+    Per-day tracking: date, narrative, themes, sentiment, top channels, popularity.
+    """
+    from app.services.youtube_trending_service import load_daily_summaries
+    await get_mongo_client()
+    summaries = await load_daily_summaries(limit=limit)
+    return {"summaries": summaries, "pipeline": "youtube_narrative"}
+
+
+@router.get("/social/narrative-shift")
+async def get_narrative_shift():
+    """Return latest narrative shift run from DB."""
+    from app.services.narrative_shift_service import load_latest_run
+    await get_mongo_client()
+    run = await load_latest_run()
+    if not run:
+        return {"generated_at": None, "narratives": [], "platform_totals": {}, "items_total": 0}
+    return run
+
+
+@router.get("/social/narrative-intelligence-daily")
+async def get_narrative_intelligence_daily(days: int = 7):
+    """Return last N days of narrative intelligence daily reports from DB."""
+    from app.services.narrative_intelligence_daily_service import load_last_n_days
+    await get_mongo_client()
+    reports = await load_last_n_days(days=min(days, 30))
+    return {"reports": reports}
+
+
+@router.post("/social/youtube-narrative/refresh")
+async def refresh_youtube_narrative():
+    """Run the YouTube narrative pipeline (YouTube API + 1 LLM call → save daily summary)."""
+    from app.services.youtube_trending_service import run_youtube_narrative_pipeline
+    from app.config import get_config
+    yt_cfg = get_config().get("youtube_trending")
+    if not isinstance(yt_cfg, dict) or not yt_cfg.get("enabled", True):
+        raise HTTPException(status_code=403, detail="youtube_trending disabled")
+    result = await run_youtube_narrative_pipeline()
+    return result
+
+
 # --- Sahi strategic brief (1–2 suggestions from themes, mentions, topics, competitors) ---
 
 @router.get("/social/sahi-strategic-brief")

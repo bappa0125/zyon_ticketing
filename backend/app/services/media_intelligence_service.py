@@ -1,7 +1,7 @@
 """Media Intelligence dashboard — coverage, feed, timeline, top publications, topics, by_domain.
 Reads from article_documents + entity_mentions (single pipeline); no media_articles."""
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 from app.core.client_config_loader import get_entity_names, get_competitor_names, load_clients
 from app.services.mongodb import get_mongo_client
@@ -61,6 +61,306 @@ def _date_str(dt: datetime | None) -> str | None:
     return None
 
 
+async def _load_unified_mentions(
+    *,
+    em_coll,
+    art_coll,
+    entities: Sequence[str],
+    cutoff: datetime,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Load and unify mentions from entity_mentions and article_documents.
+    - One item per (url, entity) pair.
+    - Sorted by published_at desc.
+    - Optional limit on number of unified items returned.
+    """
+    raw: list[dict[str, Any]] = []
+
+    # 1. entity_mentions: entity (string) in entities
+    try:
+        cursor = (
+            em_coll.find(
+                {
+                    "entity": {"$in": list(entities)},
+                    "$or": [
+                        {"published_at": {"$gte": cutoff}},
+                        {"timestamp": {"$gte": cutoff}},
+                    ],
+                }
+            )
+            .sort("published_at", -1)
+            .sort("timestamp", -1)
+        )
+        if limit is not None:
+            cursor = cursor.limit(limit * 2)
+        async for doc in cursor:
+            pub = doc.get("published_at") or doc.get("timestamp")
+            raw.append(
+                {
+                    "_source": "entity_mentions",
+                    "title": doc.get("title") or "Untitled",
+                    "source": doc.get("source") or doc.get("source_domain") or "",
+                    "published_at": pub,
+                    "snippet": doc.get("summary") or doc.get("snippet") or "",
+                    "ai_summary": (doc.get("ai_summary") or "").strip() or None,
+                    "sentiment": doc.get("sentiment"),
+                    "url": (doc.get("url") or "").strip(),
+                    "url_original": (doc.get("url_original") or "").strip(),
+                    "url_note": (doc.get("url_note") or "").strip(),
+                    "entity": (doc.get("entity") or "").strip(),
+                    "id": str(doc.get("_id", "")),
+                    "content_quality": doc.get("content_quality") or "full_text",
+                    "author": (doc.get("author") or "").strip()[:300] if doc.get("author") else None,
+                }
+            )
+    except Exception:
+        pass
+
+    # 2. article_documents: entities (array) contains any of our entities
+    try:
+        cursor = (
+            art_coll.find(
+                {
+                    "entities": {"$in": list(entities)},
+                    "$or": [
+                        {"published_at": {"$gte": cutoff}},
+                        {"fetched_at": {"$gte": cutoff}},
+                    ],
+                }
+            )
+            .sort("published_at", -1)
+            .sort("fetched_at", -1)
+        )
+        if limit is not None:
+            cursor = cursor.limit(limit * 2)
+        async for doc in cursor:
+            pub = doc.get("published_at") or doc.get("fetched_at")
+            ents = doc.get("entities") or []
+            article_text = (doc.get("article_text") or "").strip()
+            content_quality = "snippet" if not article_text else "full_text"
+            for entity_val in ents:
+                if not isinstance(entity_val, str) or entity_val not in entities:
+                    continue
+                raw.append(
+                    {
+                        "_source": "article_documents",
+                        "title": doc.get("title") or "Untitled",
+                        "source": doc.get("source_domain") or doc.get("source") or "",
+                        "published_at": pub,
+                        "snippet": (doc.get("summary") or (article_text[:400] if article_text else "")).strip(),
+                        "ai_summary": (doc.get("ai_summary") or "").strip() or None,
+                        "sentiment": doc.get("sentiment"),
+                        "url": (doc.get("url") or doc.get("url_resolved") or "").strip(),
+                        "url_original": (doc.get("url_original") or "").strip(),
+                        "url_note": (doc.get("url_note") or "").strip(),
+                        "entity": (entity_val or "").strip(),
+                        "id": f"{doc.get('_id', '')}_{entity_val or ''}",
+                        "content_quality": content_quality,
+                        "author": (doc.get("author") or "").strip()[:300] if doc.get("author") else None,
+                    }
+                )
+    except Exception:
+        pass
+
+    # Dedupe by (url, entity). Prefer items WITH author (article_documents often have it; entity_mentions may not).
+    def _sort_key(x: dict) -> tuple:
+        has_author = 0 if (x.get("author") or "").strip() else 1
+        pub = _to_dt(x.get("published_at")) or datetime.min.replace(tzinfo=timezone.utc)
+        return (has_author, -pub.timestamp())
+
+    seen: set[str] = set()
+    unified: list[dict[str, Any]] = []
+    for r in sorted(raw, key=_sort_key):
+        url = (r.get("url") or "").strip().lower()
+        entity = (r.get("entity") or "").strip()
+        key = (
+            f"{url}|{entity}"
+            if url and entity
+            else (
+                url
+                or ("meta:" + (r.get("title") or "") + "|" + (r.get("source") or ""))
+            )
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        r["source_domain"] = _normalize_domain(r.get("source") or "")
+        unified.append(r)
+        if limit is not None and len(unified) >= limit:
+            break
+
+    return unified
+
+
+async def get_mention_counts(
+    client: str,
+    range_param: str = "7d",
+) -> dict[str, Any]:
+    """
+    Return true mention counts per entity (client + competitors) and total_mentions.
+    Uses the same unified mention logic as the dashboard but without FEED_LIMIT.
+    """
+    await get_mongo_client()
+    from app.services.mongodb import get_db
+    from app.core.client_config_loader import get_entity_names, get_competitor_names, load_clients
+
+    clients = await load_clients()
+    client_obj = next(
+        (c for c in clients if (c.get("name") or "").strip().lower() == client.strip().lower()),
+        None,
+    )
+    if not client_obj:
+        return {"client": client, "competitors": [], "range": range_param, "entity_counts": {}, "total_mentions": 0}
+
+    client_name = (client_obj.get("name") or "").strip()
+    entities = get_entity_names(client_obj)
+    competitor_names = get_competitor_names(client_obj)
+    delta = _parse_range(range_param)
+    cutoff = datetime.now(timezone.utc) - delta
+
+    db = get_db()
+    em_coll = db[ENTITY_MENTIONS_COLLECTION]
+    art_coll = db[ARTICLE_DOCUMENTS_COLLECTION]
+
+    unified = await _load_unified_mentions(
+        em_coll=em_coll,
+        art_coll=art_coll,
+        entities=entities,
+        cutoff=cutoff,
+        limit=None,
+    )
+
+    counts: dict[str, int] = {e: 0 for e in entities}
+    for r in unified:
+        e = (r.get("entity") or "").strip()
+        if e in counts:
+            counts[e] += 1
+
+    total = sum(counts.values())
+    return {
+        "client": client_name,
+        "competitors": competitor_names,
+        "range": range_param,
+        "entity_counts": counts,
+        "total_mentions": total,
+    }
+
+
+async def get_articles_for_entity(
+    client: str,
+    range_param: str,
+    entity: str | None,
+    page: int,
+    page_size: int,
+) -> dict[str, Any]:
+    """
+    Paginated list of articles/mentions for a specific entity (client or competitor)
+    in the given range. Uses unified mentions; does not call any LLM.
+    """
+    await get_mongo_client()
+    from app.services.mongodb import get_db
+    from app.core.client_config_loader import get_entity_names, get_competitor_names, load_clients
+
+    clients = await load_clients()
+    client_obj = next(
+        (c for c in clients if (c.get("name") or "").strip().lower() == client.strip().lower()),
+        None,
+    )
+    if not client_obj:
+        return {
+            "client": client,
+            "entity": entity or client,
+            "range": range_param,
+            "total_articles": 0,
+            "page": page,
+            "page_size": page_size,
+            "rows": [],
+        }
+
+    client_name = (client_obj.get("name") or "").strip()
+    entities = get_entity_names(client_obj)
+    competitor_names = get_competitor_names(client_obj)
+    if not entities:
+        return {
+            "client": client_name,
+            "entity": entity or client_name,
+            "range": range_param,
+            "total_articles": 0,
+            "page": page,
+            "page_size": page_size,
+            "rows": [],
+        }
+
+    chosen_entity = (entity or client_name).strip()
+    if chosen_entity not in entities:
+        chosen_entity = client_name
+
+    delta = _parse_range(range_param)
+    cutoff = datetime.now(timezone.utc) - delta
+
+    db = get_db()
+    em_coll = db[ENTITY_MENTIONS_COLLECTION]
+    art_coll = db[ARTICLE_DOCUMENTS_COLLECTION]
+
+    unified = await _load_unified_mentions(
+        em_coll=em_coll,
+        art_coll=art_coll,
+        entities=entities,
+        cutoff=cutoff,
+        limit=None,
+    )
+
+    # Filter to chosen entity
+    filtered = [r for r in unified if (r.get("entity") or "").strip() == chosen_entity]
+    total_articles = len(filtered)
+
+    # Simple pagination in memory (safe for current data sizes)
+    if page < 1:
+        page = 1
+    if page_size < 1:
+        page_size = 25
+    max_page_size = 100
+    if page_size > max_page_size:
+        page_size = max_page_size
+    start = (page - 1) * page_size
+    end = start + page_size
+    page_items = filtered[start:end]
+
+    rows: list[dict[str, Any]] = []
+    for r in page_items:
+        pub = r.get("published_at")
+        pub_iso = pub.isoformat() if isinstance(pub, datetime) else str(pub or "")[:50]
+        url = (r.get("url") or "").strip()
+        summary = (r.get("ai_summary") or "").strip() or (r.get("snippet") or "")[:400]
+
+        rows.append(
+            {
+                "id": r.get("id", ""),
+                "entity": chosen_entity,
+                "title": (r.get("title") or "Untitled")[:500],
+                "summary": summary,
+                "link": url,
+                "source": (r.get("source") or "")[:200],
+                "source_domain": r.get("source_domain") or "",
+                "journalist": (r.get("author") or "").strip() if isinstance(r.get("author"), str) else None,
+                "published_at": pub_iso,
+                "sentiment": r.get("sentiment"),
+            }
+        )
+
+    return {
+        "client": client_name,
+        "competitors": competitor_names,
+        "entity": chosen_entity,
+        "range": range_param,
+        "total_articles": total_articles,
+        "page": page,
+        "page_size": page_size,
+        "rows": rows,
+    }
+
+
 async def get_dashboard(
     client: str,
     range_param: str = "7d",
@@ -104,92 +404,14 @@ async def get_dashboard(
     em_coll = db[ENTITY_MENTIONS_COLLECTION]
     art_coll = db[ARTICLE_DOCUMENTS_COLLECTION]
 
-    # Collect raw items from entity_mentions and article_documents (in range, for any of the entities)
-    raw: list[dict[str, Any]] = []
-
-    # 1. entity_mentions: entity (string) in entities
-    try:
-        cursor = em_coll.find(
-            {
-                "entity": {"$in": entities},
-                "$or": [
-                    {"published_at": {"$gte": cutoff}},
-                    {"timestamp": {"$gte": cutoff}},
-                ],
-            }
-        ).sort("published_at", -1).sort("timestamp", -1).limit(FEED_LIMIT * 2)
-        async for doc in cursor:
-            pub = doc.get("published_at") or doc.get("timestamp")
-            raw.append({
-                "_source": "entity_mentions",
-                "title": doc.get("title") or "Untitled",
-                "source": doc.get("source") or doc.get("source_domain") or "",
-                "published_at": pub,
-                "snippet": doc.get("summary") or doc.get("snippet") or "",
-                "ai_summary": (doc.get("ai_summary") or "").strip() or None,
-                "sentiment": doc.get("sentiment"),
-                "url": (doc.get("url") or "").strip(),
-                "url_original": (doc.get("url_original") or "").strip(),
-                "url_note": (doc.get("url_note") or "").strip(),
-                "entity": (doc.get("entity") or "").strip(),
-                "id": str(doc.get("_id", "")),
-                "content_quality": doc.get("content_quality") or "full_text",
-            })
-    except Exception:
-        pass
-
-    # 2. article_documents: entities (array) contains any of our entities
-    try:
-        cursor = art_coll.find(
-            {
-                "entities": {"$in": entities},
-                "$or": [
-                    {"published_at": {"$gte": cutoff}},
-                    {"fetched_at": {"$gte": cutoff}},
-                ],
-            }
-        ).sort("published_at", -1).sort("fetched_at", -1).limit(FEED_LIMIT * 2)
-        async for doc in cursor:
-            pub = doc.get("published_at") or doc.get("fetched_at")
-            ents = doc.get("entities") or []
-            # One raw item per (doc, entity) so multi-entity articles appear once per entity
-            for entity_val in ents:
-                if entity_val not in entities:
-                    continue
-                article_text = (doc.get("article_text") or "").strip()
-                content_quality = "snippet" if not article_text else "full_text"
-                raw.append({
-                    "_source": "article_documents",
-                    "title": doc.get("title") or "Untitled",
-                    "source": doc.get("source_domain") or doc.get("source") or "",
-                    "published_at": pub,
-                    "snippet": (doc.get("summary") or (article_text[:400] if article_text else "")).strip(),
-                    "ai_summary": (doc.get("ai_summary") or "").strip() or None,
-                    "sentiment": doc.get("sentiment"),
-                    "url": (doc.get("url") or doc.get("url_resolved") or "").strip(),
-                    "url_original": (doc.get("url_original") or "").strip(),
-                    "url_note": (doc.get("url_note") or "").strip(),
-                    "entity": (entity_val or "").strip() if isinstance(entity_val, str) else "",
-                    "id": f"{doc.get('_id', '')}_{entity_val or ''}",
-                    "content_quality": content_quality,
-                })
-    except Exception:
-        pass
-
-    # Dedupe by (url, entity) so same article can appear once per entity (multiple mentions)
-    seen: set[str] = set()
-    unified: list[dict[str, Any]] = []
-    for r in sorted(raw, key=lambda x: _to_dt(x.get("published_at")) or datetime.min, reverse=True):
-        url = (r.get("url") or "").strip().lower()
-        entity = (r.get("entity") or "").strip()
-        key = (f"{url}|{entity}" if url and entity else (url or ("meta:" + (r.get("title") or "") + "|" + (r.get("source") or ""))))
-        if key in seen:
-            continue
-        seen.add(key)
-        r["source_domain"] = _normalize_domain(r.get("source") or "")
-        unified.append(r)
-        if len(unified) >= FEED_LIMIT:
-            break
+    # Load full unified for coverage/total/by_domain (no 100 cap). Feed limited to FEED_LIMIT for display.
+    unified = await _load_unified_mentions(
+        em_coll=em_coll,
+        art_coll=art_coll,
+        entities=entities,
+        cutoff=cutoff,
+        limit=None,
+    )
 
     # Build by_domain (coverage by source) from media_sources.yaml before applying domain filter
     try:
@@ -254,9 +476,9 @@ async def get_dashboard(
         if u and e:
             url_entities.setdefault(u, set()).add(e)
 
-    # Build feed items (include sentiment, summary, content_quality, also_mentions)
+    # Build feed items (include sentiment, summary, content_quality, also_mentions). Cap at FEED_LIMIT for display.
     feed: list[dict] = []
-    for r in unified_for_feed:
+    for r in unified_for_feed[:FEED_LIMIT]:
         pub = r.get("published_at")
         pub_iso = pub.isoformat() if isinstance(pub, datetime) else str(pub or "")[:50]
         entity_val = r.get("entity") or ""

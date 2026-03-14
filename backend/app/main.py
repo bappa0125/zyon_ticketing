@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from app.api import chat, history, crawler, system_metrics, url_search, media_search, coverage, clients_api, media_api, sentiment_api, topics_api, coverage_api, opportunity_api, social_api, media_intelligence_api, reports_api, pr_intelligence_api
+from app.api import chat, history, crawler, system_metrics, url_search, media_search, coverage, clients_api, media_api, sentiment_api, topics_api, coverage_api, opportunity_api, social_api, media_intelligence_api, reports_api, pr_intelligence_api, pr_reports_api
 from app.core.logging import setup_logging, get_logger
 from app.core.health import router as health_router
 from app.core.metrics import router as metrics_router
@@ -97,6 +97,7 @@ app.include_router(coverage_api.router, prefix="/api")
 app.include_router(media_intelligence_api.router, prefix="/api")
 app.include_router(reports_api.router, prefix="/api")
 app.include_router(pr_intelligence_api.router, prefix="/api")
+app.include_router(pr_reports_api.router, prefix="/api")
 app.include_router(opportunity_api.router, prefix="/api")
 app.include_router(social_api.router, prefix="/api")
 app.include_router(system_metrics.router)

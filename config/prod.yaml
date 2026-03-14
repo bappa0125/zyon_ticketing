@@ -137,3 +137,8 @@ narrative_intelligence_daily:
   enabled: true
   llm:
     model: openrouter/free
+
+narrative_positioning:
+  enabled: true
+  llm:
+    model: openrouter/free

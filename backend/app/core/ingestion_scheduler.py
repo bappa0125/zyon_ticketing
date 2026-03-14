@@ -174,6 +174,34 @@ def _job_article_topics():
         logger.exception("scheduler_job_failed", job="article_topics", error=str(e))
 
 
+def _job_pr_opportunities():
+    """Scheduled job: PR opportunities (quote alerts, outreach drafts, competitor responses). Once/day."""
+    if _skip_if_backfill("pr_opportunities"):
+        return
+    from app.services.pr_opportunities_service import run_pr_opportunities_all_clients
+
+    logger.info("scheduler_job_start", job="pr_opportunities")
+    try:
+        result = asyncio.run(run_pr_opportunities_all_clients())
+        logger.info("scheduler_job_complete", job="pr_opportunities", result=result)
+    except Exception as e:
+        logger.exception("scheduler_job_failed", job="pr_opportunities", error=str(e))
+
+
+def _job_pr_report_daily():
+    """Scheduled job: PR daily snapshots (outreach, benchmarks, sentiment). Once per day."""
+    if _skip_if_backfill("pr_report_daily"):
+        return
+    from app.services.pr_report_service import run_daily_snapshot_all_clients
+
+    logger.info("scheduler_job_start", job="pr_report_daily")
+    try:
+        result = asyncio.run(run_daily_snapshot_all_clients())
+        logger.info("scheduler_job_complete", job="pr_report_daily", result=result)
+    except Exception as e:
+        logger.exception("scheduler_job_failed", job="pr_report_daily", error=str(e))
+
+
 def _job_sahi_strategic_brief():
     """Scheduled job: Generate Sahi strategic brief, store in DB. Once per day."""
     if _skip_if_backfill("sahi_strategic_brief"):
@@ -216,6 +244,22 @@ def _job_reddit_trending():
         logger.info("scheduler_job_complete", job="reddit_trending", result=result)
     except Exception as e:
         logger.exception("scheduler_job_failed", job="reddit_trending", error=str(e))
+
+
+def _job_narrative_positioning():
+    """Scheduled job: PR-focused narrative positioning per client (1 LLM call per client)."""
+    if _skip_if_backfill("narrative_positioning"):
+        return
+    np_cfg = get_config().get("narrative_positioning")
+    if not isinstance(np_cfg, dict) or not np_cfg.get("enabled", True):
+        return
+    from app.services.narrative_positioning_service import run_positioning_for_all_clients
+    logger.info("scheduler_job_start", job="narrative_positioning")
+    try:
+        result = asyncio.run(run_positioning_for_all_clients())
+        logger.info("scheduler_job_complete", job="narrative_positioning", result=result)
+    except Exception as e:
+        logger.exception("scheduler_job_failed", job="narrative_positioning", error=str(e))
 
 
 def _job_narrative_intelligence_daily():
@@ -288,6 +332,8 @@ def start_scheduler():
         _scheduler.add_job(_job_reddit_trending, "interval", minutes=reddit_trending_min, id="reddit_trending")
 
     _scheduler.add_job(_job_ai_brief_daily, "cron", hour=6, minute=0, id="ai_brief_daily")
+    _scheduler.add_job(_job_pr_report_daily, "cron", hour=5, minute=30, id="pr_report_daily")
+    _scheduler.add_job(_job_pr_opportunities, "cron", hour=6, minute=30, id="pr_opportunities_daily")
     _scheduler.add_job(_job_sahi_strategic_brief, "cron", hour=7, minute=0, id="sahi_strategic_brief_daily")
     yt_cfg = cfg.get("youtube_trending")
     if isinstance(yt_cfg, dict) and yt_cfg.get("enabled", False):
@@ -300,6 +346,12 @@ def start_scheduler():
             _scheduler.add_job(_job_narrative_intelligence_daily, "cron", hour=9, minute=0, id="narrative_intelligence_daily")
         except Exception as e:
             logger.warning("narrative_intelligence_daily job not scheduled", error=str(e))
+    np_cfg = cfg.get("narrative_positioning")
+    if isinstance(np_cfg, dict) and np_cfg.get("enabled", True):
+        try:
+            _scheduler.add_job(_job_narrative_positioning, "cron", hour=9, minute=30, id="narrative_positioning")
+        except Exception as e:
+            logger.warning("narrative_positioning job not scheduled", error=str(e))
 
     # Run RSS once shortly after start so the queue gets new items without waiting 4h
     _scheduler.add_job(

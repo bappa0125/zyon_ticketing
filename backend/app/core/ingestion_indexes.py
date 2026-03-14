@@ -59,6 +59,36 @@ async def ensure_ingestion_indexes():
         except Exception as e:
             logger.debug("rss_items_index_skip", error=str(e))
 
+        # pr_daily_snapshots (P1/P2 report collections)
+        try:
+            ps = db["pr_daily_snapshots"]
+            await ps.create_index([("client", 1), ("date", -1)], name="ix_client_date")
+        except Exception as e:
+            logger.debug("pr_daily_snapshots_index_skip", error=str(e))
+        try:
+            pr = db["pr_press_releases"]
+            await pr.create_index([("client", 1), ("published_at", -1)], name="ix_client_published_at")
+        except Exception as e:
+            logger.debug("pr_press_releases_index_skip", error=str(e))
+        try:
+            pp = db["pr_press_release_pickups"]
+            await pp.create_index([("client", 1), ("published_at", -1)], name="ix_client_published_at")
+            await pp.create_index([("press_release_id", 1), ("article_url", 1)], name="ix_pr_url_unique")
+        except Exception as e:
+            logger.debug("pr_press_release_pickups_index_skip", error=str(e))
+        try:
+            po = db["pr_opportunities"]
+            await po.create_index([("client", 1), ("type", 1), ("date", -1)], name="ix_client_type_date")
+        except Exception as e:
+            logger.debug("pr_opportunities_index_skip", error=str(e))
+
+        # narrative_positioning (PR-focused intelligence per client)
+        try:
+            np = db["narrative_positioning"]
+            await np.create_index([("client", 1), ("date", -1)], name="ix_client_date")
+        except Exception as e:
+            logger.debug("narrative_positioning_index_skip", error=str(e))
+
         logger.info("ingestion_indexes_ensured")
     except Exception as e:
         logger.warning("ingestion_indexes_setup", error=str(e))

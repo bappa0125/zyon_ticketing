@@ -130,6 +130,25 @@ async def get_narrative_intelligence_daily(days: int = 7):
     return {"reports": reports}
 
 
+@router.get("/social/narrative-positioning")
+async def get_narrative_positioning(client: str, days: int = 7):
+    """Return narrative positioning (PR-focused) for a client from DB."""
+    if not client or not client.strip():
+        return {"reports": []}
+    from app.services.narrative_positioning_service import load_positioning
+    await get_mongo_client()
+    reports = await load_positioning(client=client.strip(), days=min(days, 30))
+    return {"reports": reports}
+
+
+@router.post("/social/narrative-positioning/run-batch")
+async def run_narrative_positioning_batch():
+    """Run narrative positioning batch for all clients."""
+    from app.services.narrative_positioning_service import run_positioning_for_all_clients
+    result = await run_positioning_for_all_clients()
+    return result
+
+
 @router.post("/social/youtube-narrative/refresh")
 async def refresh_youtube_narrative():
     """Run the YouTube narrative pipeline (YouTube API + 1 LLM call → save daily summary)."""

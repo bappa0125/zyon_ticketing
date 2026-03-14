@@ -28,20 +28,22 @@ const NAV_STRUCTURE: (NavLink | NavGroup)[] = [
       { href: "/media", label: "Media" },
     ],
   },
-  {
-    label: "Action",
-    items: [
-      { href: "/targets", label: "Targets" },
-      { href: "/opportunities", label: "Opportunities" },
-      { href: "/pr-intelligence", label: "PR Intelligence" },
-    ],
-  },
+{
+        label: "Action",
+        items: [
+          { href: "/targets", label: "Targets" },
+          { href: "/opportunities", label: "Opportunities" },
+          { href: "/pr-intelligence", label: "PR Intelligence" },
+          { href: "/reports", label: "Reports" },
+        ],
+      },
   { href: "/clients", label: "Clients" },
   {
     label: "Social",
     items: [
       { href: "/social", label: "Social" },
       { href: "/social/narrative-shift", label: "Narrative Shift" },
+      { href: "/social/narrative-intelligence", label: "Narrative Positioning" },
     ],
   },
 ];

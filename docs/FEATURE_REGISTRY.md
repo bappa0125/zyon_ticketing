@@ -320,3 +320,31 @@ Topic-article mapping, first mention detection, amplifier detection, and journal
 
 **Description:**  
 MongoDB aggregation over entity_mentions + article_documents. Topics from KeyBERT (article_topics_worker). No LLM calls; respects daily quota.
+
+---
+
+## Feature 7.6 — Narrative Positioning
+
+**Status:** Implemented
+
+**Purpose:**  
+PR-focused intelligence per client: narratives, positioning (headline, pitch angle, suggested outlets), threats, opportunities, evidence refs. 1 LLM call per client per day in batch job.
+
+**Files involved:**
+
+- `backend/app/services/narrative_positioning_service.py`
+- `backend/app/api/social_api.py` (GET /social/narrative-positioning, POST /social/narrative-positioning/run-batch)
+- `backend/app/core/ingestion_indexes.py` (narrative_positioning collection)
+- `backend/app/core/ingestion_scheduler.py` (cron 09:30 UTC)
+- `backend/scripts/run_narrative_positioning_backfill.py`
+- `frontend/src/app/social/narrative-intelligence/page.tsx`
+- `config/dev.yaml`, `config/prod.yaml` (narrative_positioning section)
+- `docs/NARRATIVE_POSITIONING_DEPLOY_TEST.md`
+
+**API:**
+
+- `GET /api/social/narrative-positioning?client=Sahi&days=7`
+- `POST /api/social/narrative-positioning/run-batch`
+
+**Description:**  
+Reads from narrative_intelligence_daily, narrative_shift, Reddit/YouTube summaries, entity_mentions, article_documents, social_posts. Single LLM synthesis per client → narratives, positioning, threats, opportunities, evidence_refs. Stores in `narrative_positioning` (client, date).

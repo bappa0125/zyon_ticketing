@@ -192,3 +192,9 @@ narrative_intelligence_daily:
   enabled: true
   llm:
     model: openrouter/free
+
+# Narrative Positioning — PR-focused per client (1 LLM call per client/day)
+narrative_positioning:
+  enabled: true
+  llm:
+    model: openrouter/free

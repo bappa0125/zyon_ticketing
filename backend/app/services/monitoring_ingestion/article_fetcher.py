@@ -21,7 +21,10 @@ STATUS_PROCESSED = "processed"
 STATUS_FAILED = "failed"
 MAX_BATCH = 20
 HTTP_TIMEOUT = 15
-USER_AGENT = "ZyonArticleFetcher/1.0"
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/120.0.0.0 Safari/537.36"
+)
 
 
 def _normalize_url(url: str) -> str:
@@ -65,30 +68,77 @@ def _source_domain_from_url(url: str) -> str:
     return netloc[:200]
 
 
-def _extract_author_from_byline(html: str) -> str | None:
-    """Fallback: parse HTML for author/byline when trafilatura metadata has none.
-    Handles LiveMint-style author links, rel=author, meta tags, and 'By X' patterns."""
+def _extract_author_from_jsonld(html: str) -> str | None:
+    """Extract author from JSON-LD Article/NewsArticle schema."""
     if not html or not html.strip():
         return None
+    import json
     try:
         soup = BeautifulSoup(html, "html.parser")
+        for script in soup.find_all("script", type="application/ld+json"):
+            raw = (script.string or "").strip()
+            if not raw:
+                continue
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(data, dict):
+                data = [data]
+            if not isinstance(data, list):
+                continue
+            for item in data:
+                if not isinstance(item, dict):
+                    continue
+                t = (item.get("@type") or "").lower()
+                if "article" not in t and "newsarticle" not in t:
+                    continue
+                author = item.get("author")
+                if not author:
+                    continue
+                if isinstance(author, str):
+                    name = author.strip()
+                elif isinstance(author, dict):
+                    name = (author.get("name") or author.get("@id") or "").strip()
+                elif isinstance(author, list) and author:
+                    a0 = author[0]
+                    name = (a0.get("name") if isinstance(a0, dict) else str(a0)).strip()
+                else:
+                    continue
+                if name and 3 <= len(name) <= 200 and not any(c in name for c in ["http", "://"]):
+                    return _sanitize_author(name)
     except Exception:
+        pass
+    return None
+
+
+def _extract_author_from_meta(soup: BeautifulSoup) -> str | None:
+    """Extract author from meta tags (author, article:author, twitter:creator, dcterms.creator)."""
+    if not soup:
         return None
+    meta_names = (
+        "author", "article:author", "og:article:author",
+        "twitter:creator", "dcterms.creator", "creator", "byl",
+    )
+    for meta in soup.find_all("meta", attrs={"content": True}):
+        name = (meta.get("name") or meta.get("property") or "").lower()
+        if name in meta_names:
+            content = (meta.get("content") or "").strip()
+            if content and len(content) <= 200 and not content.startswith("http"):
+                return _sanitize_author(content)
+    return None
 
-    candidates: list[str] = []
 
-    # 1. Links to /authors/ or /author/ (LiveMint, many news sites)
+def _extract_author_from_links(soup: BeautifulSoup) -> str | None:
+    """Extract from author links (/authors/, /author/, rel=author)."""
+    if not soup:
+        return None
     for a in soup.find_all("a", href=True):
         href = (a.get("href") or "").lower()
         if "/authors/" in href or re.search(r"/author/[^/]+/?$", href):
             text = (a.get_text(strip=True) or "").strip()
             if text and len(text) <= 120 and not any(c in text for c in ["http", "www.", ".com"]):
-                candidates.append(text)
-                break  # first author link wins
-    if candidates:
-        return _sanitize_author(candidates[0])
-
-    # 2. link rel="author"
+                return _sanitize_author(text)
     for link in soup.find_all("link", rel=True):
         rel = (link.get("rel") or [])
         if isinstance(rel, str):
@@ -97,27 +147,51 @@ def _extract_author_from_byline(html: str) -> str | None:
             title = (link.get("title") or "").strip()
             if title and len(title) <= 120:
                 return _sanitize_author(title)
+    return None
 
-    # 3. Meta tags (article:author, author)
-    for meta in soup.find_all("meta", attrs={"content": True}):
-        name = (meta.get("name") or meta.get("property") or "").lower()
-        if name in ("author", "article:author", "og:article:author"):
-            content = (meta.get("content") or "").strip()
-            if content and len(content) <= 120:
-                return _sanitize_author(content)
 
-    # 4. Regex: "By X", "Written by X", "Reported by X" in first 4000 chars (byline usually near top)
-    head = html[:4000]
-    for pattern in [
-        r"(?:By|Written by|Reported by|Authored by)\s+([A-Za-z][A-Za-z\s\-\.']{2,80}?)(?:\s*[,\|]|\s*</|$)",
-        r">([A-Za-z][A-Za-z\s\-\.']{2,60})\s*[,\|]\s*(?:Staff Writer|Correspondent|Reporter)",
-    ]:
+def _extract_author_from_byline_regex(html: str) -> str | None:
+    """Regex patterns for byline text (By X, Written by X, etc.)."""
+    if not html or len(html) < 100:
+        return None
+    head = html[:5000]
+    patterns = [
+        r"(?:By|Written by|Reported by|Authored by|Contributed by)\s+([A-Za-z][A-Za-z\s\-\.']{2,80}?)(?:\s*[,\|]|\s*</|$|\n)",
+        r">([A-Za-z][A-Za-z\s\-\.']{2,60})\s*[,\|]\s*(?:Staff Writer|Correspondent|Reporter|Editor|Journalist)",
+        r"(?:Author|Writer)\s*[:\-]\s*([A-Za-z][A-Za-z\s\-\.']{2,80}?)(?:\s*[,\|]|\s*</|$)",
+        r'<span[^>]*class="[^"]*author[^"]*"[^>]*>([^<]{3,80})</span>',
+        r'data-author="([^"]{3,80})"',
+    ]
+    for pattern in patterns:
         m = re.search(pattern, head, re.IGNORECASE | re.DOTALL)
         if m:
             name = m.group(1).strip()
-            if 3 <= len(name) <= 100 and not re.search(r"\d|http|@|\.(com|org)", name):
+            if 3 <= len(name) <= 100 and not re.search(r"\d{4}|http|@|\.(com|org|net)\b", name):
                 return _sanitize_author(name)
+    return None
 
+
+def _extract_author_from_byline(html: str) -> str | None:
+    """Parse HTML for author: JSON-LD, meta, author links, byline regex."""
+    if not html or not html.strip():
+        return None
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+    except Exception:
+        soup = None
+
+    for extractor in [
+        lambda: _extract_author_from_jsonld(html),
+        lambda: _extract_author_from_meta(soup) if soup else None,
+        lambda: _extract_author_from_links(soup) if soup else None,
+        lambda: _extract_author_from_byline_regex(html),
+    ]:
+        try:
+            author = extractor()
+            if author:
+                return author
+        except Exception:
+            pass
     return None
 
 
@@ -155,7 +229,12 @@ def _fetch_and_extract(url: str) -> tuple[str | None, int, str, str, str | None]
     """Fetch URL (follow redirects), extract article text and author. Returns (text, length, url_original, url_resolved, author)."""
     url_original = (url or "").strip()[:2000]
     try:
-        with httpx.Client(timeout=HTTP_TIMEOUT, follow_redirects=True, headers={"User-Agent": USER_AGENT}) as client:
+        headers = {
+            "User-Agent": USER_AGENT,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+        with httpx.Client(timeout=HTTP_TIMEOUT, follow_redirects=True, headers=headers) as client:
             resp = client.get(url_original)
             resp.raise_for_status()
             html = resp.text

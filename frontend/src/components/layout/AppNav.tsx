@@ -33,6 +33,7 @@ const NAV_STRUCTURE: (NavLink | NavGroup)[] = [
     items: [
       { href: "/targets", label: "Targets" },
       { href: "/opportunities", label: "Opportunities" },
+      { href: "/pr-intelligence", label: "PR Intelligence" },
     ],
   },
   { href: "/clients", label: "Clients" },

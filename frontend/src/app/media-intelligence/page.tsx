@@ -8,6 +8,7 @@ import { MentionsTrendChart } from "@/components/MediaIntelligence/MentionsTrend
 import { TopPublicationsList } from "@/components/MediaIntelligence/TopPublicationsList";
 import { TopicsList } from "@/components/MediaIntelligence/TopicsList";
 import { CoverageByDomain, type DomainRow } from "@/components/MediaIntelligence/CoverageByDomain";
+import { PRSummaryCard } from "@/components/MediaIntelligence/PRSummaryCard";
 import { getApiBase } from "@/lib/api";
 
 interface DashboardData {
@@ -20,6 +21,7 @@ interface DashboardData {
   top_publications: { source: string; mentions: number }[];
   topics: { topic: string; mentions: number }[];
   by_domain?: DomainRow[];
+  pr_summary?: string;
 }
 
 const RANGE_OPTIONS = [
@@ -221,6 +223,16 @@ export default function MediaIntelligencePage() {
                   />
                 </div>
               </div>
+              {client.toLowerCase() === "sahi" && (
+                <div className="mt-4 mb-4">
+                  <PRSummaryCard
+                    client={client}
+                    range={range}
+                    prSummary={data?.pr_summary ?? ""}
+                    loading={loading}
+                  />
+                </div>
+              )}
               <div className="mt-4">
                 <CoverageByDomain
                   byDomain={data?.by_domain ?? []}

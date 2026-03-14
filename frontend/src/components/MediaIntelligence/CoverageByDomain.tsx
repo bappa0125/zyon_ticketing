@@ -72,7 +72,9 @@ export function CoverageByDomain({
           </thead>
           <tbody className="divide-y divide-zinc-800">
             {byDomain.map((row) => {
-              const clientCount = row.entities[clientName] ?? 0;
+              const ent = row.entities || {};
+              const entityKey = Object.keys(ent).find((k) => k.toLowerCase() === clientName.toLowerCase());
+              const clientCount = (ent[clientName] ?? (entityKey ? ent[entityKey] : undefined)) ?? 0;
               const isSelected = selectedDomain === row.domain;
               return (
                 <tr
@@ -86,11 +88,15 @@ export function CoverageByDomain({
                   <td className="text-right py-1.5 px-1 text-zinc-400">{row.total}</td>
                   <td className={`text-right py-1.5 px-1 ${getEntityTailwindText(clientName)}`}>{clientCount}</td>
                   {showCompetitorColumns
-                    ? competitors.map((comp) => (
-                        <td key={comp} className={`text-right py-1.5 px-1 ${getEntityTailwindText(comp)}`}>
-                          {row.entities[comp] ?? 0}
-                        </td>
-                      ))
+                    ? competitors.map((comp) => {
+                        const ck = Object.keys(ent).find((k) => k.toLowerCase() === comp.toLowerCase());
+                        const val = ent[comp] ?? (ck ? ent[ck] : undefined);
+                        return (
+                          <td key={comp} className={`text-right py-1.5 px-1 ${getEntityTailwindText(comp)}`}>
+                            {val ?? 0}
+                          </td>
+                        );
+                      })
                     : (
                       <td className="text-right py-1.5 pl-1 text-zinc-400">
                         {row.total - clientCount}

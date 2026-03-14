@@ -296,3 +296,27 @@ Map natural-language queries (e.g. "latest news on Sahi") to canonical entity na
 
 **Description:**  
 Uses `clients.yaml` (name, aliases, competitors) to resolve queries to canonical entity. Enables correct disambiguation (e.g. "Sahi trading") and context filtering for ambiguous entities.
+
+---
+
+## Feature 7.5 — PR Intelligence Layer
+
+**Status:** Implemented
+
+**Purpose:**  
+Topic-article mapping, first mention detection, amplifier detection, and journalist-outlet mapping. Read-only; no LLM; uses KeyBERT topics from article_documents.
+
+**Files involved:**
+
+- `backend/app/services/pr_intelligence_service.py` — core logic (topic-article, first mention, amplifier, journalist-outlet)
+- `backend/app/api/pr_intelligence_api.py` — API routes
+
+**API:**
+
+- `GET /api/pr-intelligence/topic-articles?client=Sahi&range=7d` — Map topics to articles
+- `GET /api/pr-intelligence/first-mentions?client=Sahi&range=7d` — Earliest article per (topic, entity)
+- `GET /api/pr-intelligence/amplifiers?client=Sahi&topic=...&range=7d` — Articles after first mention, by author/outlet
+- `GET /api/pr-intelligence/journalist-outlets?client=Sahi&range=30d` — Journalist → outlets index
+
+**Description:**  
+MongoDB aggregation over entity_mentions + article_documents. Topics from KeyBERT (article_topics_worker). No LLM calls; respects daily quota.

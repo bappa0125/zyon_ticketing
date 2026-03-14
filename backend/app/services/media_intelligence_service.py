@@ -25,7 +25,45 @@ def _normalize_domain(source: str) -> str:
         s = s.split("://", 1)[1]
     if "/" in s:
         s = s.split("/", 1)[0]
+    if s.startswith("www."):
+        s = s[4:]
     return s[:200]
+
+
+def _domain_from_url(url: str) -> str:
+    """Extract domain from URL for matching media_sources. Strips www. Never returns news.google.com."""
+    if not url or not isinstance(url, str):
+        return ""
+    from urllib.parse import urlparse
+    parsed = urlparse((url or "").strip())
+    netloc = (parsed.netloc or "").split(":")[0].lower()
+    if not netloc or netloc == "news.google.com":
+        return ""
+    if netloc.startswith("www."):
+        netloc = netloc[4:]
+    return netloc[:200] if "." in netloc and " " not in netloc else ""
+
+
+def _map_to_config_domain(domain: str, config_domains: set[str]) -> str | None:
+    """
+    Map a raw domain (from URL or DB) to the matching media_sources domain.
+    Handles subdomains: m.economictimes.indiatimes.com -> economictimes.indiatimes.com.
+    Handles www prefix: www.livemint.com -> livemint.com.
+    Returns the config domain key to use, or None if no match.
+    """
+    if not domain or not isinstance(domain, str):
+        return None
+    d = domain.strip().lower()
+    if not d or " " in d:
+        return None
+    if d.startswith("www."):
+        d = d[4:]
+    if d in config_domains:
+        return d
+    for cfg in config_domains:
+        if d == cfg or d.endswith("." + cfg):
+            return cfg
+    return None
 
 
 def _parse_range(range_param: str) -> timedelta:
@@ -185,7 +223,10 @@ async def _load_unified_mentions(
         if key in seen:
             continue
         seen.add(key)
-        r["source_domain"] = _normalize_domain(r.get("source") or "")
+        # Prefer domain from URL so we match media_sources.yaml; fallback to normalizing source
+        url_val = (r.get("url") or "").strip()
+        domain_from_url = _domain_from_url(url_val) if url_val else ""
+        r["source_domain"] = domain_from_url or _normalize_domain(r.get("source") or "")
         unified.append(r)
         if limit is not None and len(unified) >= limit:
             break
@@ -420,21 +461,29 @@ async def get_dashboard(
     except Exception:
         config_sources = []
     domain_to_name: dict[str, str] = {}
+    config_domain_set: set[str] = set()
     for s in config_sources:
         d = _normalize_domain(s.get("domain") or "")
         if d:
             domain_to_name[d] = (s.get("name") or d)[:100]
-    # Count per (domain, entity) from unified
+            config_domain_set.add(d)
+    # Count per (domain, entity) from unified — map raw source_domain to config domain (handles subdomains)
+    # Entity match is case-insensitive (entity_mentions may have "Zerodha" or "zerodha")
+    entity_lower_to_canonical: dict[str, str] = {e.strip().lower(): e.strip() for e in entities if e and isinstance(e, str)}
     domain_entity_count: dict[str, dict[str, int]] = {}
     for r in unified:
-        d = r.get("source_domain") or ""
-        if not d:
+        raw_d = r.get("source_domain") or ""
+        if not raw_d:
+            continue
+        d = _map_to_config_domain(raw_d, config_domain_set)
+        if d is None:
             continue
         if d not in domain_entity_count:
             domain_entity_count[d] = {e: 0 for e in entities}
-        e = r.get("entity") or ""
-        if e in domain_entity_count[d]:
-            domain_entity_count[d][e] += 1
+        raw_entity = (r.get("entity") or "").strip()
+        e_canonical = entity_lower_to_canonical.get(raw_entity.lower()) if raw_entity else None
+        if e_canonical and e_canonical in domain_entity_count[d]:
+            domain_entity_count[d][e_canonical] += 1
     by_domain: list[dict[str, Any]] = []
     for d in domain_to_name:
         counts = domain_entity_count.get(d, {e: 0 for e in entities})
@@ -450,8 +499,12 @@ async def get_dashboard(
     # Optional filter by domain for feed/coverage/timeline/top_pubs/topics
     if domain_filter:
         domain_norm = _normalize_domain(domain_filter)
-        if domain_norm:
-            unified = [r for r in unified if r.get("source_domain") == domain_norm]
+        if domain_norm and domain_norm in config_domain_set:
+            def _matches_domain(r: dict) -> bool:
+                raw = r.get("source_domain") or ""
+                mapped = _map_to_config_domain(raw, config_domain_set) if raw else None
+                return mapped == domain_norm
+            unified = [r for r in unified if _matches_domain(r)]
 
     # Optional filter by content_quality for feed (coverage/timeline stay full)
     if content_quality in ("full_text", "snippet"):
@@ -555,6 +608,16 @@ async def get_dashboard(
                 freq[w] = freq.get(w, 0) + 1
     topics = [{"topic": w, "mentions": c} for w, c in sorted(freq.items(), key=lambda x: -x[1])[:TOPICS_LIMIT]]
 
+    # Deterministic PR summary from Coverage by Source (no LLM)
+    pr_summary = _build_pr_summary(
+        client_name=client_name,
+        competitor_names=competitor_names,
+        range_param=range_param,
+        by_domain=by_domain,
+        topics=topics,
+        coverage=coverage,
+    )
+
     return {
         "client": client_name,
         "competitors": competitor_names,
@@ -565,4 +628,84 @@ async def get_dashboard(
         "top_publications": top_publications,
         "topics": topics,
         "by_domain": by_domain,
+        "pr_summary": pr_summary,
     }
+
+
+def _build_pr_summary(
+    *,
+    client_name: str,
+    competitor_names: Sequence[str],
+    range_param: str,
+    by_domain: list[dict[str, Any]],
+    topics: list[dict[str, Any]],
+    coverage: list[dict[str, Any]],
+) -> str:
+    """
+    Build a deterministic PR agency summary from Coverage by Source data.
+    No LLM - pure Python template from the table data.
+    """
+    period_label = {"24h": "last 24 hours", "7d": "last 7 days", "30d": "last 30 days"}.get(
+        range_param, f"last {range_param}"
+    )
+    total_mentions = sum(c.get("mentions", 0) for c in coverage)
+    sources_with_data = [r for r in by_domain if r.get("total", 0) > 0]
+    top_sources = sorted(sources_with_data, key=lambda x: -x.get("total", 0))[:8]
+    top_topics = [t.get("topic", "") for t in topics[:10] if t.get("topic")]
+
+    # Opportunities: sources where client has 0 but competitors have mentions
+    opportunities = [
+        r.get("name") or r.get("domain", "")
+        for r in sources_with_data
+        if (r.get("entities", {}) or {}).get(client_name, 0) == 0 and r.get("total", 0) >= 2
+    ][:6]
+
+    lines: list[str] = []
+
+    # Executive summary
+    if total_mentions == 0:
+        lines.append(f"## Executive summary\nNo mentions for {client_name} or competitors in the {period_label}.")
+    else:
+        lines.append(
+            f"## Executive summary\n"
+            f"In the {period_label}, {len(sources_with_data)} sources covered {client_name} and competitors "
+            f"with {total_mentions} total mentions."
+        )
+
+    # Top sources
+    if top_sources:
+        lines.append("\n## Top sources by coverage")
+        for r in top_sources[:6]:
+            name = r.get("name") or r.get("domain", "")
+            total = r.get("total", 0)
+            client_count = (r.get("entities") or {}).get(client_name, 0)
+            lines.append(f"- **{name}**: {total} mentions ({client_count} for {client_name})")
+
+    # Opportunities
+    if opportunities:
+        lines.append("\n## High-priority outlets (opportunity)")
+        lines.append(
+            f"These outlets wrote about competitors but not {client_name}: "
+            + ", ".join(opportunities)
+            + ". Target for PR outreach."
+        )
+
+    # Trending topics
+    if top_topics:
+        lines.append("\n## Trending topics")
+        lines.append("Top keywords in coverage: " + ", ".join(top_topics[:8]) + ".")
+
+    # Recommendations
+    lines.append("\n## Recommendations")
+    if opportunities:
+        lines.append(
+            f"1. Prioritize outreach to {opportunities[0]}" + (f" and {opportunities[1]}" if len(opportunities) > 1 else "") + "."
+        )
+    if top_topics:
+        lines.append(f"2. Pitch stories around: {top_topics[0]}, {top_topics[1]}" + (f", {top_topics[2]}" if len(top_topics) > 2 else "") + ".")
+    lines.append("3. Monitor share of voice vs competitors in top sources.")
+    lines.append("4. Run media monitoring regularly to track coverage changes.")
+
+    return "\n".join(lines).strip()
+
+

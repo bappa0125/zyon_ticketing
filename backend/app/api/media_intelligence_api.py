@@ -1,4 +1,4 @@
-"""Media Intelligence dashboard API — single endpoint for dashboard data."""
+"""Media Intelligence dashboard API — dashboard data with PR summary."""
 from typing import Optional
 
 from fastapi import APIRouter, Query

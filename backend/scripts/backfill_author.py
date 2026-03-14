@@ -29,6 +29,7 @@ async def run_backfill(
     limit: int | None = 500,
     delay_sec: float = 1.5,
     batch_size: int = 50,
+    domain: str | None = None,
 ) -> dict[str, int]:
     """Find article_documents without author, re-fetch, extract author, update article_documents and entity_mentions."""
     await get_mongo_client()
@@ -43,6 +44,9 @@ async def run_backfill(
             {"author": ""},
         ]
     }
+    if domain:
+        dom = domain.strip().lower().replace("www.", "")
+        query["source_domain"] = dom
     cursor = (
         article_coll.find(query)
         .sort("fetched_at", -1)
@@ -105,11 +109,13 @@ def main():
     p.add_argument("--limit", type=int, default=500, help="Max articles to process (default 500)")
     p.add_argument("--delay", type=float, default=1.5, help="Seconds between fetches (default 1.5)")
     p.add_argument("--batch", type=int, default=50, help="Unused, for compatibility")
+    p.add_argument("--domain", type=str, default="", help="Filter by source_domain (e.g. livemint.com)")
     args = p.parse_args()
     result = asyncio.run(
         run_backfill(
             limit=args.limit,
             delay_sec=max(0.0, args.delay),
+            domain=args.domain.strip() or None,
         )
     )
     print(result)

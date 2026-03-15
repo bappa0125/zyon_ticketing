@@ -150,6 +150,7 @@ async def _llm_positioning(client_name: str, inputs: dict[str, Any]) -> dict[str
         '"opportunities" (array of {angle, outlet_match}, 2-4 items), '
         '"evidence_refs" (array of {platform, url, title, snippet}, max 8), '
         '"brief_summary" (string: 2-4 sentences on what is trending, how client vs competitors are showing up, and 2-3 actionable recommendations for the PR team), '
+        '"positioning_mix_summary" (string: 2-3 sentences on topic mix, forum vs news split, and where competitors appear without the client — evidence to inform ad/PR/social next moves; no prescription, just observation), '
         '"content_suggestions" (array of exactly 3 items: one for articles/news, one for YouTube, one for Reddit. Each item: { "place": "articles" | "YouTube" | "Reddit", "title": "suggested title for the piece", "theme": "topic or angle in one line" }).'
     )
     user = (
@@ -197,6 +198,7 @@ async def _llm_positioning(client_name: str, inputs: dict[str, Any]) -> dict[str
             "opportunities": _normalize_opportunities(parsed.get("opportunities")),
             "evidence_refs": _normalize_evidence_refs(parsed.get("evidence_refs")),
             "brief_summary": _normalize_brief_summary(parsed.get("brief_summary")),
+            "positioning_mix_summary": _normalize_positioning_mix_summary(parsed.get("positioning_mix_summary")),
             "content_suggestions": _normalize_content_suggestions(parsed.get("content_suggestions")),
         }
     except json.JSONDecodeError:
@@ -281,6 +283,13 @@ def _normalize_brief_summary(val: Any) -> str:
     return val.strip()[:3000]
 
 
+def _normalize_positioning_mix_summary(val: Any) -> str:
+    """Short summary: topic mix, forum vs news, competitor gaps (evidence only)."""
+    if not isinstance(val, str) or not val.strip():
+        return ""
+    return val.strip()[:500]
+
+
 def _normalize_content_suggestions(lst: Any) -> list[dict]:
     """Exactly 3 items: place (articles | YouTube | Reddit), title, theme."""
     if not isinstance(lst, list):
@@ -313,6 +322,7 @@ def _empty_output() -> dict[str, Any]:
         "opportunities": [],
         "evidence_refs": [],
         "brief_summary": "",
+        "positioning_mix_summary": "",
         "content_suggestions": [
             {"place": "articles", "title": "", "theme": ""},
             {"place": "YouTube", "title": "", "theme": ""},
@@ -363,6 +373,7 @@ async def run_positioning_for_all_clients() -> dict[str, Any]:
                 "opportunities": result["opportunities"],
                 "evidence_refs": result["evidence_refs"],
                 "brief_summary": result.get("brief_summary") or "",
+                "positioning_mix_summary": result.get("positioning_mix_summary") or "",
                 "content_suggestions": result.get("content_suggestions") or _empty_output()["content_suggestions"],
             }
             await coll.replace_one(

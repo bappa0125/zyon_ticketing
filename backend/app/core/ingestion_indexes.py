@@ -89,6 +89,43 @@ async def ensure_ingestion_indexes():
         except Exception as e:
             logger.debug("narrative_positioning_index_skip", error=str(e))
 
+        # ai_search_answers (AI search narrative pipeline)
+        try:
+            asc_cfg = cfg.get("ai_search_narrative") or {}
+            coll_name = (asc_cfg.get("mongodb") or {}).get("answers_collection") or "ai_search_answers"
+            asc = db[coll_name]
+            await asc.create_index([("date", -1), ("query", 1)], name="ix_date_query")
+        except Exception as e:
+            logger.debug("ai_search_answers_index_skip", error=str(e))
+
+        # AI Search Visibility (Phase 1)
+        try:
+            vis_cfg = cfg.get("ai_search_visibility") or {}
+            mongo = vis_cfg.get("mongodb") or {}
+            answers_name = mongo.get("answers_collection") or "visibility_answers"
+            runs_name = mongo.get("runs_collection") or "visibility_runs"
+            snap_name = mongo.get("snapshots_collection") or "visibility_weekly_snapshots"
+            rec_name = mongo.get("recommendations_collection") or "visibility_recommendations"
+            await db[answers_name].create_index(
+                [("query", 1), ("engine", 1), ("week", -1)],
+                name="ix_query_engine_week",
+            )
+            await db[runs_name].create_index(
+                [("client", 1), ("query", 1), ("engine", 1), ("week", -1)],
+                name="ix_client_query_engine_week",
+            )
+            await db[snap_name].create_index([("client", 1), ("week", -1)], name="ix_client_week")
+            await db[rec_name].create_index([("client", 1), ("week", -1)], name="ix_client_week")
+        except Exception as e:
+            logger.debug("ai_search_visibility_index_skip", error=str(e))
+
+        # executive_competitor_reports (weekly report, fetch latest by generated_at)
+        try:
+            ecr = db["executive_competitor_reports"]
+            await ecr.create_index([("generated_at", -1)], name="ix_generated_at")
+        except Exception as e:
+            logger.debug("executive_competitor_reports_index_skip", error=str(e))
+
         logger.info("ingestion_indexes_ensured")
     except Exception as e:
         logger.warning("ingestion_indexes_setup", error=str(e))

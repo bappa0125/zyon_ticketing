@@ -1,10 +1,17 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { ChatSidebar } from "@/components/ChatSidebar";
 import { ChatMessage } from "@/components/ChatMessage";
 import { ChatInput } from "@/components/ChatInput";
 import { getApiBase } from "@/lib/api";
+
+export type HintType = "mentions" | "coverage" | "narrative" | "sentiment";
+
+export interface SuggestedHint {
+  text: string;
+  hint_type: HintType;
+}
 
 const STEP_PREFIX = "[STEP]";
 const LIVE_SEARCH_PENDING = "[LIVE_SEARCH_PENDING]";
@@ -31,6 +38,29 @@ function parseStepLine(line: string): PipelineStep | null {
   return null;
 }
 
+function buildSuggestedHints(clients: { name: string; competitors?: string[] }[]): SuggestedHint[] {
+  const hints: SuggestedHint[] = [];
+  const first = clients[0];
+  if (!first?.name) return [];
+  const clientName = first.name.trim();
+  const competitors = first.competitors ?? [];
+  const entities = [clientName, ...competitors].filter(Boolean).slice(0, 3);
+
+  if (entities[0]) {
+    hints.push({ text: `Latest articles about ${entities[0]}`, hint_type: "mentions" });
+  }
+  if (entities[1]) {
+    hints.push({ text: `Recent mentions of ${entities[1]}`, hint_type: "mentions" });
+  }
+  if (entities[2]) {
+    hints.push({ text: `Find articles about ${entities[2]}`, hint_type: "mentions" });
+  }
+  hints.push({ text: `Competitor coverage for ${clientName}`, hint_type: "coverage" });
+  hints.push({ text: `Narrative positioning for ${clientName}`, hint_type: "narrative" });
+  hints.push({ text: `Sentiment for ${clientName}`, hint_type: "sentiment" });
+  return hints.slice(0, 6);
+}
+
 export default function ChatPage() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<{ role: string; content: string }[]>([]);
@@ -44,6 +74,26 @@ export default function ChatPage() {
   const [liveSearchButtonBusy, setLiveSearchButtonBusy] = useState(false);
   const lastSearchQueryRef = useRef<string>("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [clients, setClients] = useState<{ name: string; competitors?: string[] }[]>([]);
+
+  const suggestedHints = useMemo(() => buildSuggestedHints(clients), [clients]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${getApiBase()}/clients`);
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (!cancelled && data.clients?.length) {
+          setClients(data.clients);
+        }
+      } catch {
+        // keep default empty
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
 
@@ -85,7 +135,11 @@ export default function ChatPage() {
     scrollToBottom();
   }, [messages]);
 
-  const sendMessage = async (text: string, triggerLiveSearch: boolean = false) => {
+  const sendMessage = async (
+    text: string,
+    triggerLiveSearch: boolean = false,
+    options?: { db_only?: boolean; hint_type?: HintType }
+  ) => {
     if (!conversationId || !text.trim()) return;
 
     if (!triggerLiveSearch) {
@@ -97,9 +151,7 @@ export default function ChatPage() {
     setLiveSearchPending(false);
     liveSearchPendingAtRef.current = null;
     setLiveSearchButtonBusy(!!triggerLiveSearch);
-    if (triggerLiveSearch) {
-      // Keep the button visible; we'll disable it while the live search runs.
-    } else {
+    if (!triggerLiveSearch) {
       lastSearchQueryRef.current = text;
       setLiveSearchAvailableForLastResponse(false);
     }
@@ -112,6 +164,8 @@ export default function ChatPage() {
           conversation_id: conversationId,
           message: text,
           live_search: !!triggerLiveSearch,
+          db_only: options?.db_only ?? false,
+          hint_type: options?.hint_type ?? null,
         }),
       });
 
@@ -239,13 +293,20 @@ export default function ChatPage() {
             {messages.length === 0 && (
               <div className="text-center text-[var(--ai-muted)] py-16">
                 <h2 className="text-xl font-semibold mb-2 text-[var(--ai-text)]">How can I help you today?</h2>
-                <p className="text-sm mb-4">I can find articles and mentions about monitored companies. Try asking:</p>
-                <ul className="text-sm text-[var(--ai-text-secondary)] space-y-1 max-w-md mx-auto text-left list-disc list-inside">
-                  <li>Give me the latest articles about Sahi</li>
-                  <li>Show me recent mentions of Zerodha</li>
-                  <li>Find articles about Upstox</li>
-                  <li>Latest news on Groww</li>
-                </ul>
+                <p className="text-sm mb-4">Answers from your monitored sources only. Try one of these:</p>
+                <div className="flex flex-wrap justify-center gap-2 max-w-2xl mx-auto">
+                  {suggestedHints.map((h, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => sendMessage(h.text, false, { db_only: true, hint_type: h.hint_type })}
+                      disabled={loading}
+                      className="px-3 py-2 rounded-xl text-sm font-medium border border-[var(--ai-border)] bg-[var(--ai-surface)] text-[var(--ai-text-secondary)] hover:bg-[var(--ai-surface-hover)] hover:text-[var(--ai-text)] hover:border-[var(--ai-accent)]/40 transition-colors disabled:opacity-50"
+                    >
+                      {h.text}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
             {messages.slice(0, -1).map((msg, i) => (
@@ -308,7 +369,22 @@ export default function ChatPage() {
         </div>
 
         <div className="border-t border-[var(--ai-border)] p-4">
-          <ChatInput onSend={sendMessage} disabled={loading} />
+          {suggestedHints.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-3">
+              {suggestedHints.map((h, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => sendMessage(h.text, false, { db_only: true, hint_type: h.hint_type })}
+                  disabled={loading}
+                  className="px-2.5 py-1.5 rounded-lg text-xs font-medium border border-[var(--ai-border)] bg-[var(--ai-surface)] text-[var(--ai-text-secondary)] hover:bg-[var(--ai-surface-hover)] hover:text-[var(--ai-text)] transition-colors disabled:opacity-50"
+                >
+                  {h.text}
+                </button>
+              ))}
+            </div>
+          )}
+          <ChatInput onSend={(text) => sendMessage(text)} disabled={loading} />
         </div>
       </main>
     </div>

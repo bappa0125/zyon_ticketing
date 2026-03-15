@@ -19,6 +19,8 @@ This document lists every pipeline that **writes** data into MongoDB: pipeline n
 | 9. Crawler snapshots / competitors | `web_snapshots`, `competitors` | Crawler / competitor flows using `snapshot_store.py` |
 | 10. Crawler alerts | `alerts` | Crawler using `crawler/alert_store.py` |
 | 11. YouTube narrative | `youtube_narrative_videos`, `youtube_narrative_summaries` | Scheduler (daily 8:00 UTC) or `POST /api/social/youtube-narrative/refresh` |
+| 12. AI search narrative | `ai_search_answers` | Scheduler (daily 10:30 UTC) or `POST /api/social/ai-search-narrative/refresh` |
+| 13. AI Search Visibility (Phase 1) | `visibility_answers`, `visibility_runs`, `visibility_weekly_snapshots`, `visibility_recommendations` | Scheduler (weekly Sun 02:00 UTC) or `POST /api/social/ai-search-visibility/refresh` |
 
 *Chat and app data (conversations, messages) are written by `app/services/mongodb.py` and are not ingestion pipelines.*
 
@@ -142,6 +144,40 @@ This document lists every pipeline that **writes** data into MongoDB: pipeline n
 
 ---
 
+## 5e. AI search narrative → `ai_search_answers`
+
+**What it does:** Runs a small set of fixed search queries (e.g. category/client-relevant) through an AI search provider (Perplexity via OpenRouter). Stores answer text + metadata per query per date for Narrative Analytics and positioning. Rate-limited (max queries per run, delay between calls) for free tier.
+
+| File | Role |
+|------|------|
+| `backend/app/services/ai_search_narrative_service.py` | Builds query list from config; calls Perplexity (LLMGateway with use_web_search); stores in `ai_search_answers`. |
+| `backend/app/api/social_api.py` | `GET /api/social/ai-search-answers?days=7&query=`, `POST /api/social/ai-search-narrative/refresh`. |
+
+**Config:** `ai_search_narrative` in config: `enabled`, `search_queries`, `max_queries_per_run`, `delay_seconds_between_calls`, `mongodb.answers_collection`. Requires `OPENROUTER_API_KEY`. Free tier: keep max_queries_per_run low (e.g. 6) and delay ≥ 4s.
+
+**Trigger:** Scheduler daily at 10:30 UTC, or `POST /api/social/ai-search-narrative/refresh`, or master backfill (`--skip ai_search_narrative` to omit).
+
+**Collections:** `ai_search_answers` (query, provider, answer, date, computed_at).
+
+---
+
+## 5f. AI Search Visibility (Phase 1) → `visibility_answers`, `visibility_runs`, `visibility_weekly_snapshots`, `visibility_recommendations`
+
+**What it does:** Runs curated prompts (five groups, capped per run) via Perplexity once per (query, engine, week); stores answers in `visibility_answers`. For each client, runs existing entity detection on each answer and stores `visibility_runs` (entities_found). Computes weekly snapshots (AI Visibility Index, per-group scores) and rule-based recommendations when competitors appear but company does not.
+
+| File | Role |
+|------|------|
+| `backend/app/services/ai_search_visibility_service.py` | Load prompt groups from `config/ai_visibility_prompts.yaml`; call Perplexity (cached by query/week); entity detection via `entity_detection_service.detect_entities()`; write runs, snapshots, recommendations. |
+| `backend/app/api/social_api.py` | `GET /api/social/ai-search-visibility/dashboard?client=&weeks=`, `POST /api/social/ai-search-visibility/refresh`. |
+
+**Config:** `ai_search_visibility` in config: `enabled`, `prompt_groups_file`, `max_prompts_per_run`, `max_per_group_per_run`, `delay_seconds_between_calls`, `enabled_engines: [perplexity]`, `mongodb.*`. Requires `OPENROUTER_API_KEY`. Weekly run only; cache avoids re-running same query in same week.
+
+**Trigger:** Scheduler weekly Sunday 02:00 UTC, or `POST /api/social/ai-search-visibility/refresh`, or master backfill (`--skip ai_search_visibility` to omit).
+
+**Collections:** `visibility_answers` (query, group_id, group_name, engine, week, answer_text); `visibility_runs` (client, query, engine, week, entities_found); `visibility_weekly_snapshots` (client, week, overall_index, group_metrics, engine_metrics); `visibility_recommendations` (client, week, query, competitors_found, recommendation_text).
+
+---
+
 ## 6. Social monitor (Apify) → `social_posts`
 
 **What it does:** Fetches social mentions (e.g. Twitter/other) via Apify (`social_monitor_service`), applies guardrails, and inserts into `social_posts`.
@@ -236,6 +272,11 @@ This document lists every pipeline that **writes** data into MongoDB: pipeline n
 | **web_snapshots** | Crawler → `crawler/snapshot_store.py` |
 | **competitors** | Crawler → `crawler/snapshot_store.py` |
 | **alerts** | Crawler → `crawler/alert_store.py` |
+| **ai_search_answers** | AI search narrative → `ai_search_narrative_service.py` |
+| **visibility_answers** | AI Search Visibility → `ai_search_visibility_service.py` |
+| **visibility_runs** | AI Search Visibility → `ai_search_visibility_service.py` |
+| **visibility_weekly_snapshots** | AI Search Visibility → `ai_search_visibility_service.py` |
+| **visibility_recommendations** | AI Search Visibility → `ai_search_visibility_service.py` |
 
 ---
 
@@ -253,6 +294,8 @@ The backend runs an in-process ingestion scheduler when `scheduler.enabled: true
 | Crawler enqueue | `crawler_enqueue_interval_minutes` (default 30) | Enqueues `crawl_website` jobs to Redis |
 | YouTube narrative (cron) | Daily 08:00 UTC | `youtube_narrative_videos`, `youtube_narrative_summaries` |
 | Narrative intelligence daily (cron) | Daily 09:00 UTC | `narrative_intelligence_daily` |
+| AI search narrative (cron) | Daily 10:30 UTC | `ai_search_answers` |
+| AI Search Visibility (cron) | Weekly Sunday 02:00 UTC | `visibility_answers`, `visibility_runs`, `visibility_weekly_snapshots`, `visibility_recommendations` |
 
 Config keys: `scheduler.enabled`, `scheduler.rss_interval_hours`, `scheduler.article_fetcher_interval_minutes`, `scheduler.entity_mentions_interval_minutes`, `scheduler.reddit_interval_minutes`, `scheduler.youtube_interval_minutes`, `scheduler.crawler_enqueue_interval_minutes`. Set `scheduler.enabled: false` to disable.
 
@@ -272,6 +315,7 @@ Config keys: `scheduler.enabled`, `scheduler.rss_interval_hours`, `scheduler.art
 | `run_index_cycle()` (media_index) | Crawl + index (media_index path) | `media_articles`, Qdrant |
 | `docker compose exec backend python scripts/run_narrative_shift_backfill.py` | Narrative shift (YouTube+Reddit+news clustering) | (in-memory, served via API) |
 | `docker compose exec backend python scripts/run_narrative_intelligence_backfill.py` | Narrative shift + daily synthesis | `narrative_intelligence_daily` |
+| `POST /api/social/ai-search-narrative/refresh` | AI search narrative (Perplexity queries) | `ai_search_answers` |
 | **`docker compose exec backend python scripts/run_master_backfill.py`** | **All ingestion jobs in dependency order** | All collections above |
 
 ### Master backfill (daily morning run)
@@ -286,7 +330,7 @@ docker compose exec backend python scripts/run_master_backfill.py
 - **Dependencies:** Runs in correct order (RSS → article fetcher → entity mentions → sentiment/topics → AI summary, etc.).
 - **Deduplication:** Each service handles its own (URL dedup, date-based upserts).
 - **Continue on error:** By default, one failing job does not stop the rest. Use `--strict` to exit on first failure.
-- **Skip phases:** `--skip narrative --skip youtube` to omit narrative pipelines or YouTube narrative.
+- **Skip phases:** `--skip narrative --skip youtube --skip ai_search_narrative` to omit narrative pipelines, YouTube narrative, or AI search narrative.
 - **Dry run:** `--dry-run` shows what would run without executing.
 - **Scheduler paused during backfill:** While the master backfill runs, it sets a Redis lock (`ingestion:backfill_running`). The in-process ingestion scheduler checks this before each job and skips the run if the lock is set, so scheduled jobs do not overlap with the backfill. The lock is cleared when the script exits (or after 2h TTL if the script crashes).
 

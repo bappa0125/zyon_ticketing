@@ -14,9 +14,8 @@ Usage:
 Options:
   --strict          Exit on first failure (default: continue on error)
   --dry-run         Print what would run, do not execute
-  --skip PHASE      Skip phase(s): rss, article, entity, sentiment, topics,
-                    ai_summary, reddit, youtube, reddit_trending, youtube_narrative,
-                    narrative_shift, narrative_daily, coverage_summary, sahi, ai_brief, crawler, forum
+  --only PHASE      Run only this phase (e.g. --only forum_ingestion). All others skipped.
+  --skip PHASE      Skip phase(s): rss, article_fetcher, forum_ingestion, entity_mentions, etc.
   --skip-deps       Skip optional dependency checks (Redis, Qdrant)
 """
 from __future__ import annotations
@@ -49,8 +48,11 @@ class RunState:
     dry_run: bool = False
     skip: set[str] = field(default_factory=set)
     skip_deps: bool = False
+    only_phase: str | None = None  # if set, run only this phase (canonical name)
 
     def should_run(self, phase: str) -> bool:
+        if self.only_phase is not None:
+            return phase == self.only_phase
         if phase in self.skip:
             return False
         return True
@@ -282,6 +284,38 @@ async def _phase_narrative_daily_async(state: RunState) -> StepResult:
         return StepResult("narrative_daily", False, time.monotonic() - start, message=str(e))
 
 
+async def _phase_ai_search_narrative_async(state: RunState) -> StepResult:
+    cfg = __import__("app.config", fromlist=["get_config"]).get_config()
+    asc = cfg.get("ai_search_narrative") or {}
+    if not (isinstance(asc, dict) and asc.get("enabled", False)):
+        return StepResult("ai_search_narrative", True, 0, "skipped (disabled in config)")
+    start = time.monotonic()
+    if state.dry_run:
+        return StepResult("ai_search_narrative", True, 0, "dry-run")
+    try:
+        from app.services.ai_search_narrative_service import run_ai_search_narrative_pipeline
+        result = await run_ai_search_narrative_pipeline()
+        return StepResult("ai_search_narrative", True, time.monotonic() - start, result=str(result))
+    except Exception as e:
+        return StepResult("ai_search_narrative", False, time.monotonic() - start, message=str(e))
+
+
+async def _phase_ai_search_visibility_async(state: RunState) -> StepResult:
+    cfg = __import__("app.config", fromlist=["get_config"]).get_config()
+    vis = cfg.get("ai_search_visibility") or {}
+    if not (isinstance(vis, dict) and vis.get("enabled", False)):
+        return StepResult("ai_search_visibility", True, 0, "skipped (disabled in config)")
+    start = time.monotonic()
+    if state.dry_run:
+        return StepResult("ai_search_visibility", True, 0, "dry-run")
+    try:
+        from app.services.ai_search_visibility_service import run_visibility_pipeline
+        result = await run_visibility_pipeline()
+        return StepResult("ai_search_visibility", True, time.monotonic() - start, result=str(result))
+    except Exception as e:
+        return StepResult("ai_search_visibility", False, time.monotonic() - start, message=str(e))
+
+
 async def _phase_coverage_summary_async(state: RunState) -> StepResult:
     """Coverage PR summary: 1 LLM call per client per day; summarizes page results for PR team."""
     start = time.monotonic()
@@ -319,19 +353,80 @@ async def _phase_ai_brief_async(state: RunState) -> StepResult:
         return StepResult("ai_brief_daily", False, time.monotonic() - start, message=str(e))
 
 
+async def _phase_executive_competitor_report_async(state: RunState) -> StepResult:
+    """Build and store Executive Competitor Intelligence report (no LLM). Runs after all data phases."""
+    start = time.monotonic()
+    if state.dry_run:
+        return StepResult("executive_competitor_report", True, 0, "dry-run")
+    try:
+        from app.services.executive_report_service import build_and_save_executive_report
+        result = await build_and_save_executive_report(range_param="7d")
+        ok = result.get("ok", False)
+        return StepResult(
+            "executive_competitor_report",
+            ok,
+            time.monotonic() - start,
+            result=str(result),
+            message=result.get("reason", "") if not ok else "",
+        )
+    except Exception as e:
+        return StepResult("executive_competitor_report", False, time.monotonic() - start, message=str(e))
+
+
 def main():
     parser = argparse.ArgumentParser(description="Master backfill – run all ingestion jobs in order")
     parser.add_argument("--strict", action="store_true", help="Exit on first failure")
     parser.add_argument("--dry-run", action="store_true", help="Print phases only, do not run")
+    parser.add_argument("--only", type=str, default=None, metavar="PHASE", help="Run only this phase (e.g. forum_ingestion)")
     parser.add_argument("--skip", action="append", default=[], help="Skip phase (repeat for multiple)")
     parser.add_argument("--skip-deps", action="store_true", help="Skip Redis/Qdrant preflight checks")
     args = parser.parse_args()
+
+    # Resolve --only to canonical phase name
+    only_phase = None
+    if args.only and args.only.strip():
+        only_raw = args.only.strip().lower()
+        ONLY_ALIASES = {
+            "forum": "forum_ingestion",
+            "forum_ingestion": "forum_ingestion",
+            "rss": "rss",
+            "article": "article_fetcher",
+            "article_fetcher": "article_fetcher",
+            "entity": "entity_mentions",
+            "entity_mentions": "entity_mentions",
+            "sentiment": "entity_sentiment",
+            "entity_sentiment": "entity_sentiment",
+            "topics": "article_topics",
+            "article_topics": "article_topics",
+            "ai_summary": "ai_summary",
+            "reddit": "reddit_monitor",
+            "reddit_monitor": "reddit_monitor",
+            "youtube": "youtube_monitor",
+            "youtube_monitor": "youtube_monitor",
+            "reddit_trending": "reddit_trending",
+            "youtube_narrative": "youtube_narrative",
+            "narrative_shift": "narrative_shift",
+            "narrative_daily": "narrative_daily",
+            "ai_search_narrative": "ai_search_narrative",
+            "ai_search_visibility": "ai_search_visibility",
+            "coverage_summary": "coverage_summary",
+            "sahi": "sahi_strategic_brief",
+            "sahi_strategic_brief": "sahi_strategic_brief",
+            "ai_brief": "ai_brief_daily",
+            "ai_brief_daily": "ai_brief_daily",
+            "crawler": "crawler_enqueue",
+            "crawler_enqueue": "crawler_enqueue",
+            "executive_report": "executive_competitor_report",
+            "executive_competitor_report": "executive_competitor_report",
+        }
+        only_phase = ONLY_ALIASES.get(only_raw, only_raw)
 
     state = RunState(
         strict=args.strict,
         dry_run=args.dry_run,
         skip={s.strip().lower() for s in args.skip if s.strip()},
         skip_deps=args.skip_deps,
+        only_phase=only_phase,
     )
 
     # Phase name -> skip flag mapping (--skip accepts various aliases)
@@ -356,6 +451,8 @@ def main():
         "narrative": ["narrative_shift", "narrative_daily"],
         "narrative_shift": "narrative_shift",
         "narrative_daily": "narrative_daily",
+        "ai_search_narrative": "ai_search_narrative",
+        "ai_search_visibility": "ai_search_visibility",
         "coverage_summary": "coverage_summary",
         "sahi": "sahi_strategic_brief",
         "ai_brief": "ai_brief_daily",
@@ -364,6 +461,8 @@ def main():
         "crawler_enqueue": "crawler_enqueue",
         "forum": "forum_ingestion",
         "forum_ingestion": "forum_ingestion",
+        "executive_report": "executive_competitor_report",
+        "executive_competitor_report": "executive_competitor_report",
     }
     normalized_skip = set()
     for s in state.skip:
@@ -449,14 +548,23 @@ async def _run_all_async(state: RunState) -> None:
         ("youtube_narrative", _phase_youtube_narrative_async),
         ("narrative_shift", _phase_narrative_shift_async),
         ("narrative_daily", _phase_narrative_daily_async),
+        ("ai_search_narrative", _phase_ai_search_narrative_async),
+        ("ai_search_visibility", _phase_ai_search_visibility_async),
         ("coverage_summary", _phase_coverage_summary_async),
         ("sahi_strategic_brief", _phase_sahi_async),
         ("ai_brief_daily", _phase_ai_brief_async),
+        ("executive_competitor_report", _phase_executive_competitor_report_async),
     ]
+
+    phase_names = [p for p, _ in PHASES]
+    if state.only_phase and state.only_phase not in phase_names:
+        print(f"  ERROR: --only '{state.only_phase}' is not a valid phase. Valid: {', '.join(phase_names)}")
+        raise SystemExit(1)
 
     for phase_name, runner in PHASES:
         if not state.should_run(phase_name):
-            print(f"  [{phase_name}] SKIP (--skip)")
+            reason = "--only" if state.only_phase else "--skip"
+            print(f"  [{phase_name}] SKIP ({reason})")
             continue
         try:
             if asyncio.iscoroutinefunction(runner):

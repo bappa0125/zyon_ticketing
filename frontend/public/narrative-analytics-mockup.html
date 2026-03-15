@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Narrative Analytics — Dashboard Mockup</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0c0c0f;
+      --surface: #16161a;
+      --border: #2a2a2e;
+      --text: #e4e4e7;
+      --muted: #71717a;
+      --accent: #3b82f6;
+      --accent2: #22c55e;
+      --accent3: #f59e0b;
+    }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 24px; min-height: 100vh; }
+    .container { max-width: 1200px; margin: 0 auto; }
+    h1 { font-size: 1.5rem; font-weight: 700; margin: 0 0 8px 0; }
+    .sub { color: var(--muted); font-size: 0.875rem; margin-bottom: 24px; }
+    .toolbar { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-bottom: 24px; padding: 12px 16px; background: var(--surface); border-radius: 12px; border: 1px solid var(--border); }
+    .toolbar label { color: var(--muted); font-size: 0.875rem; }
+    .toolbar select { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: 8px; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 24px; }
+    .card h2 { font-size: 1rem; font-weight: 600; margin: 0 0 16px 0; color: var(--text); }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
+    table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 500; }
+    tr:hover { background: rgba(255,255,255,0.03); }
+    .num { text-align: right; }
+    .tag { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 0.75rem; }
+    .tag-news { background: rgba(59, 130, 246, 0.2); color: #93c5fd; }
+    .tag-social { background: rgba(34, 197, 94, 0.2); color: #86efac; }
+    .tag-ai { background: rgba(245, 158, 11, 0.2); color: #fcd34d; }
+    .chart-wrap { height: 260px; position: relative; }
+    .foot { color: var(--muted); font-size: 0.75rem; margin-top: 32px; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Narrative Analytics</h1>
+    <p class="sub">How narratives form and track across source and engagement — client, competitors, finance domain, AI search, social, news.</p>
+
+    <div class="toolbar">
+      <div><label>Client</label><br><select><option>Sahi</option></select></div>
+      <div><label>Range</label><br><select><option>Last 7 days</option><option>Last 30 days</option></select></div>
+      <div><label>Domain</label><br><select><option>All</option><option>Finance only</option></select></div>
+    </div>
+
+    <!-- Section 1: How narratives are formed -->
+    <div class="card">
+      <h2>1. Narrative formation over time</h2>
+      <p style="color: var(--muted); font-size: 0.875rem; margin: 0 0 16px 0;">Strength/volume of each narrative by week — how multiple narratives are getting formed.</p>
+      <div class="chart-wrap">
+        <canvas id="chartFormation"></canvas>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div class="card">
+        <h2>2. Current narrative mix</h2>
+        <div class="chart-wrap">
+          <canvas id="chartMix"></canvas>
+        </div>
+      </div>
+      <div class="card">
+        <h2>3. Share by entity (client vs competitors)</h2>
+        <div class="chart-wrap">
+          <canvas id="chartEntity"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Section 2: Narrative → Source → Engagement -->
+    <div class="card">
+      <h2>4. Narrative → source → engagement</h2>
+      <p style="color: var(--muted); font-size: 0.875rem; margin: 0 0 12px 0;">Tracks narrative to source (news, social, AI search) and engagement.</p>
+      <div style="overflow-x: auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Narrative</th>
+              <th>News articles</th>
+              <th>Social</th>
+              <th>AI search (Perplexity / ChatGPT / Gemini)</th>
+              <th>Engagement</th>
+              <th>Top sources</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Zero brokerage / pricing</td>
+              <td class="num">24</td>
+              <td class="num">18</td>
+              <td class="num">—</td>
+              <td class="num">1.2k</td>
+              <td>ET, Moneycontrol, Reddit</td>
+            </tr>
+            <tr>
+              <td>Ease of use / mobile-first</td>
+              <td class="num">12</td>
+              <td class="num">31</td>
+              <td class="num">—</td>
+              <td class="num">890</td>
+              <td>YouTube, Twitter, LiveMint</td>
+            </tr>
+            <tr>
+              <td>Trust / safety</td>
+              <td class="num">8</td>
+              <td class="num">5</td>
+              <td class="num">—</td>
+              <td class="num">340</td>
+              <td>Economic Times, Forums</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>5. By source type (what news, social, AI search are telling)</h2>
+      <div style="overflow-x: auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Source type</th>
+              <th>Narratives mentioned</th>
+              <th>Volume</th>
+              <th>Sample</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="tag tag-news">News</span></td>
+              <td>Zero brokerage, Ease of use, Trust</td>
+              <td class="num">44</td>
+              <td>“Discount brokers see surge in…”</td>
+            </tr>
+            <tr>
+              <td><span class="tag tag-social">Social</span></td>
+              <td>Ease of use, Zero brokerage</td>
+              <td class="num">54</td>
+              <td>Reddit, YouTube, Twitter</td>
+            </tr>
+            <tr>
+              <td><span class="tag tag-ai">AI search</span></td>
+              <td>—</td>
+              <td class="num">—</td>
+              <td>Planned: Perplexity, ChatGPT, Gemini</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>6. Entity × narrative (client + competitors, finance domain)</h2>
+      <div style="overflow-x: auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Entity</th>
+              <th>Zero brokerage</th>
+              <th>Ease of use</th>
+              <th>Trust</th>
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Sahi</strong> (client)</td>
+              <td class="num">12</td>
+              <td class="num">20</td>
+              <td class="num">4</td>
+              <td class="num">36</td>
+            </tr>
+            <tr>
+              <td>Zerodha</td>
+              <td class="num">18</td>
+              <td class="num">14</td>
+              <td class="num">6</td>
+              <td class="num">38</td>
+            </tr>
+            <tr>
+              <td>Upstox</td>
+              <td class="num">8</td>
+              <td class="num">10</td>
+              <td class="num">2</td>
+              <td class="num">20</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <p class="foot">Mockup — Narrative Analytics dashboard. Charts and tables are placeholders. Backend would feed narrative formation, source tagging, and entity×narrative from existing pipelines + optional AI search ingestion.</p>
+  </div>
+
+  <script>
+    const opts = { responsive: true, maintainAspectRatio: false };
+    // 1. Narrative formation over time
+    new Chart(document.getElementById("chartFormation"), {
+      type: "line",
+      data: {
+        labels: ["Week 1", "Week 2", "Week 3", "Week 4"],
+        datasets: [
+          { label: "Zero brokerage", data: [8, 14, 22, 24], borderColor: "#3b82f6", fill: false, tension: 0.3 },
+          { label: "Ease of use", data: [12, 18, 15, 20], borderColor: "#22c55e", fill: false, tension: 0.3 },
+          { label: "Trust", data: [4, 5, 6, 8], borderColor: "#f59e0b", fill: false, tension: 0.3 }
+        ]
+      },
+      options: { ...opts, scales: { x: { grid: { color: "#2a2a2e" }, ticks: { color: "#71717a" } }, y: { grid: { color: "#2a2a2e" }, ticks: { color: "#71717a" } } }, plugins: { legend: { labels: { color: "#e4e4e7" } } } }
+    });
+    // 2. Narrative mix (donut)
+    new Chart(document.getElementById("chartMix"), {
+      type: "doughnut",
+      data: {
+        labels: ["Zero brokerage", "Ease of use", "Trust"],
+        datasets: [{ data: [24, 20, 8], backgroundColor: ["#3b82f6", "#22c55e", "#f59e0b"] }]
+      },
+      options: { ...opts, plugins: { legend: { position: "bottom", labels: { color: "#e4e4e7" } } } }
+    });
+    // 3. Entity share (stacked bar)
+    new Chart(document.getElementById("chartEntity"), {
+      type: "bar",
+      data: {
+        labels: ["Zero brokerage", "Ease of use", "Trust"],
+        datasets: [
+          { label: "Sahi", data: [12, 20, 4], backgroundColor: "#3b82f6" },
+          { label: "Zerodha", data: [18, 14, 6], backgroundColor: "#22c55e" },
+          { label: "Upstox", data: [8, 10, 2], backgroundColor: "#71717a" }
+        ]
+      },
+      options: { ...opts, scales: { x: { stacked: true, grid: { color: "#2a2a2e" }, ticks: { color: "#71717a" } }, y: { stacked: true, grid: { color: "#2a2a2e" }, ticks: { color: "#71717a" } } }, plugins: { legend: { labels: { color: "#e4e4e7" } } } }
+    });
+  </script>
+</body>
+</html>

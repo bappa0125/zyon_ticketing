@@ -275,6 +275,71 @@ async def reports_ai_brief_get(
     return {"brief": doc.get("brief"), "generated_at": doc.get("generated_at"), "client": doc.get("client"), "range": doc.get("range")}
 
 
+@router.get("/reports/executive-competitor")
+async def get_executive_competitor_report(
+    range_param: str = Query("7d", alias="range", description="24h | 7d | 30d"),
+    refresh: bool = Query(False, description="If true, rebuild and save report then return it"),
+):
+    """
+    Return latest Executive Competitor Intelligence report (all sections, five brands).
+    Data is read-only from existing pipelines; report is generated weekly by scheduler or on refresh.
+    """
+    from app.services.executive_report_service import get_latest_report, build_and_save_executive_report
+
+    try:
+        if refresh:
+            result = await build_and_save_executive_report(range_param=range_param)
+            if not result.get("ok"):
+                return {"report": None, "generated_at": None, "error": result.get("reason", "build_failed")}
+        doc = await get_latest_report()
+        if not doc:
+            return {"report": None, "generated_at": None, "message": "No report generated yet. Run backfill or trigger refresh.", "error": "no_report"}
+        return {"report": doc.get("payload"), "generated_at": doc.get("generated_at"), "range_param": doc.get("range_param")}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Executive report failed: {e!s}")
+
+
+@router.post("/reports/executive-competitor/populate")
+async def populate_executive_report_data():
+    """
+    Run Narrative Positioning, AI Brief, and PR Opportunities batches for all current clients
+    (from load_clients(), so when executive_competitor_analysis is enabled, all 5 brands).
+    Use this to populate Narrative shift/PR brief, PR Intelligence synopsis, and Quote alerts
+    for Zerodha, Dhan, Groww, Kotak Securities (and Sahi). Uses LLM; may take 5–15 minutes.
+    """
+    from app.core.client_config_loader import load_clients
+    from app.services.narrative_positioning_service import run_positioning_for_all_clients
+    from app.services.pr_opportunities_service import run_pr_opportunities_all_clients
+
+    clients_list = await load_clients()
+    if not clients_list:
+        return {"ok": False, "reason": "no clients", "clients": 0}
+
+    results = {}
+    try:
+        result_np = await run_positioning_for_all_clients()
+        results["narrative_positioning"] = result_np
+    except Exception as e:
+        results["narrative_positioning"] = {"ok": False, "error": str(e)}
+    try:
+        result_ai = await run_ai_brief_daily()
+        results["ai_brief"] = result_ai
+    except Exception as e:
+        results["ai_brief"] = {"ok": False, "error": str(e)}
+    try:
+        result_pr = await run_pr_opportunities_all_clients()
+        results["pr_opportunities"] = result_pr
+    except Exception as e:
+        results["pr_opportunities"] = {"ok": False, "error": str(e)}
+
+    return {
+        "ok": True,
+        "clients": len(clients_list),
+        "client_names": [(c.get("name") or "").strip() for c in clients_list if (c.get("name") or "").strip()],
+        "results": results,
+    }
+
+
 @router.post("/reports/ai-brief")
 async def reports_ai_brief(req: AIBriefRequest):
     """

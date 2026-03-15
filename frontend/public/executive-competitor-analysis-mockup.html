@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Executive Competitor Intelligence — CXO Report Mockup</title>
+  <style>
+    :root {
+      --bg: #0a0a0c;
+      --surface: #141418;
+      --surface2: #1a1a20;
+      --border: #2a2a32;
+      --text: #e8e8ec;
+      --text2: #b0b0b8;
+      --muted: #6b6b76;
+      --accent: #3b82f6;
+      --accent-dim: rgba(59,130,246,0.15);
+      --green: #22c55e;
+      --green-dim: rgba(34,197,94,0.15);
+      --amber: #f59e0b;
+      --amber-dim: rgba(245,158,11,0.15);
+      --red: #ef4444;
+      --red-dim: rgba(239,68,68,0.15);
+    }
+    * { box-sizing: border-box; }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 0; min-height: 100vh; font-size: 14px; }
+    .container { max-width: 1200px; margin: 0 auto; padding: 24px 20px 48px; }
+    .report-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 12px 16px; background: var(--surface2); border-radius: 10px; margin-bottom: 24px; font-size: 0.8rem; color: var(--muted); border: 1px solid var(--border); }
+    .report-meta span strong { color: var(--text2); }
+    h1 { font-size: 1.5rem; font-weight: 700; margin: 0 0 4px 0; letter-spacing: -0.02em; }
+    .sub { color: var(--muted); font-size: 0.85rem; margin-bottom: 20px; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+    .card h2 { font-size: 0.9rem; font-weight: 600; margin: 0 0 4px 0; color: var(--text); text-transform: uppercase; letter-spacing: 0.04em; }
+    .card .source { font-size: 0.7rem; color: var(--muted); margin-bottom: 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    th, td { padding: 10px 12px; border-bottom: 1px solid var(--border); text-align: left; }
+    th { color: var(--muted); font-weight: 500; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.03em; }
+    .num { text-align: right; }
+    .summary-hero { background: linear-gradient(145deg, var(--surface) 0%, var(--accent-dim) 100%); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin-bottom: 24px; }
+    .summary-hero h2 { font-size: 0.85rem; color: var(--muted); margin: 0 0 12px 0; text-transform: uppercase; letter-spacing: 0.05em; }
+    .summary-hero p { margin: 0 0 16px 0; line-height: 1.6; color: var(--text2); font-size: 0.95rem; }
+    .takeaways { list-style: none; padding: 0; margin: 0; }
+    .takeaways li { padding: 8px 0; padding-left: 20px; position: relative; color: var(--text2); font-size: 0.9rem; }
+    .takeaways li::before { content: ''; position: absolute; left: 0; top: 14px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+    .takeaways li.risk::before { background: var(--amber); }
+    .takeaways li.win::before { background: var(--green); }
+    .kpi { display: inline-block; padding: 4px 10px; border-radius: 8px; font-size: 0.78rem; font-weight: 600; }
+    .kpi-high { background: var(--green-dim); color: #86efac; }
+    .kpi-mid { background: var(--accent-dim); color: #93c5fd; }
+    .kpi-low { background: var(--amber-dim); color: #fcd34d; }
+    .kpi-risk { background: var(--red-dim); color: #fca5a5; }
+    .trend-up { color: var(--green); }
+    .trend-down { color: var(--red); }
+    .foot { color: var(--muted); font-size: 0.72rem; margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--border); text-align: center; }
+    .section-summary { font-size: 0.8rem; color: var(--muted); margin-bottom: 12px; line-height: 1.4; }
+    .brand-name { font-weight: 600; color: var(--text); }
+    .expand { font-size: 0.75rem; color: var(--accent); cursor: pointer; }
+    .data-quality { font-size: 0.7rem; color: var(--muted); margin-top: 8px; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    @media (max-width: 768px) { .grid2 { grid-template-columns: 1fr; } }
+    .pr-brief-block { background: var(--surface2); border-radius: 8px; padding: 12px; margin-top: 8px; font-size: 0.85rem; color: var(--text2); line-height: 1.5; border-left: 3px solid var(--accent); }
+    .narrative-headline { font-size: 0.8rem; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Executive Competitor Intelligence</h1>
+    <p class="sub">Unified view: Reputation & Sentiment (Pulse) • Media Intel & Share of Voice • Coverage & Publication Targeting • PR Opportunities • PR Intelligence (7d) • Narrative Shift & PR Brief. Five brands: Sahi, Zerodha, Dhan, Groww, Kotak Securities.</p>
+
+    <div class="report-meta">
+      <span><strong>Period:</strong> Last 7 days</span>
+      <span><strong>Week:</strong> 2025-W10</span>
+      <span><strong>Data coverage:</strong> 5 brands, 120+ articles, 28 sources, 6 prompt groups (AI)</span>
+      <span><strong>Last updated:</strong> 2025-03-08 10:00 UTC</span>
+    </div>
+
+    <!-- Executive summary + takeaways (CXO first read) -->
+    <div class="summary-hero">
+      <h2>Executive summary</h2>
+      <p>
+        Sahi’s AI visibility index improved 8 pts week-on-week (35% → 43% in comparison queries) while sentiment held stable. Zerodha and Groww continue to lead share of voice in tier-1 finance media; Dhan and Kotak show the highest concentration of negative sentiment in Pulse. Three high-value PR opportunities are open this week (quote alerts, publication gaps). Narrative shift highlights rising “zero brokerage” and “ease of use” themes—Sahi’s PR brief aligns with both; Zerodha’s brief flags competitor messaging on derivatives.
+      </p>
+      <ul class="takeaways">
+        <li class="win">AI visibility: Sahi +8 pts in product-comparison prompts; Zerodha still dominant in Zerodha-alternative queries (95%).</li>
+        <li>Share of voice: Groww leads in social + news (32%); Sahi at 18%—opportunity in publication targeting (ET, Moneycontrol under-indexed).</li>
+        <li class="risk">Sentiment: Dhan and Kotak show elevated negative mention rate (Pulse); recommend monitoring next 7d.</li>
+        <li>PR opportunities: 3 quote alerts, 2 publication-targeting gaps; top action: pitch derivatives story to 2 tier-1 outlets.</li>
+        <li>Narrative: “Zero brokerage” and “mobile-first” are top themes; PR briefs updated for all five brands with positioning angles.</li>
+      </ul>
+    </div>
+
+    <!-- 1. Pulse: Reputation + Sentiment -->
+    <div class="card">
+      <h2>1. Reputation & sentiment (Pulse)</h2>
+      <p class="source">Source: Pulse page — Reputation score, Sentiment distribution</p>
+      <p class="section-summary">One-glance: reputation score and sentiment trend per brand. Data quality: based on entity mentions in monitored articles and social (last 7d).</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Brand</th>
+            <th class="num">Reputation score</th>
+            <th class="num">Sentiment (pos / neu / neg)</th>
+            <th class="num">Trend vs prev 7d</th>
+            <th>Risk / note</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="brand-name">Sahi</td><td class="num">72</td><td class="num">58% / 32% / 10%</td><td class="num trend-up">↑ stable</td><td>—</td></tr>
+          <tr><td class="brand-name">Zerodha</td><td class="num">78</td><td class="num">62% / 28% / 10%</td><td class="num trend-up">↑ +2</td><td>—</td></tr>
+          <tr><td class="brand-name">Dhan</td><td class="num">58</td><td class="num">45% / 38% / 17%</td><td class="num trend-down">↓ neg +3%</td><td>Elevated negative</td></tr>
+          <tr><td class="brand-name">Groww</td><td class="num">75</td><td class="num">60% / 30% / 10%</td><td class="num trend-up">↑ stable</td><td>—</td></tr>
+          <tr><td class="brand-name">Kotak Securities</td><td class="num">62</td><td class="num">48% / 35% / 17%</td><td class="num trend-down">↓ neg +2%</td><td>Monitor</td></tr>
+        </tbody>
+      </table>
+      <p class="data-quality">Based on 47 sentiment-tagged mentions across 12 sources. Reputation: 0–100 scale from Pulse logic.</p>
+    </div>
+
+    <!-- 2. Media Intelligence: PR agency summary + Share of voice -->
+    <div class="card">
+      <h2>2. PR agency summary & share of voice (Media Intelligence)</h2>
+      <p class="source">Source: Media Intelligence page — PR agency summary, Share of voice</p>
+      <p class="section-summary">Summary of how each brand is appearing in earned media and social; share of voice across the five brands.</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Brand</th>
+            <th class="num">Share of voice %</th>
+            <th class="num">News</th>
+            <th class="num">Social</th>
+            <th>PR agency summary (1 line)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="brand-name">Sahi</td><td class="num">18%</td><td class="num">14%</td><td class="num">22%</td><td>Steady coverage in fintech verticals; fewer tier-1 headlines than Zerodha/Groww.</td></tr>
+          <tr><td class="brand-name">Zerodha</td><td class="num">28%</td><td class="num">30%</td><td class="num">26%</td><td>Dominant in mainstream and trading press; strong quote pickup.</td></tr>
+          <tr><td class="brand-name">Dhan</td><td class="num">12%</td><td class="num">10%</td><td class="num">14%</td><td>Growing in social; limited tier-1 news presence.</td></tr>
+          <tr><td class="brand-name">Groww</td><td class="num">32%</td><td class="num">28%</td><td class="num">36%</td><td>Highest SOV; strong in both news and social narratives.</td></tr>
+          <tr><td class="brand-name">Kotak Securities</td><td class="num">10%</td><td class="num">18%</td><td class="num">2%</td><td>News-heavy, minimal social share of voice.</td></tr>
+        </tbody>
+      </table>
+      <p class="data-quality">Share of voice from Media Intelligence pipeline. Summary: aggregated from top mentions and sources.</p>
+    </div>
+
+    <!-- 3. Coverage intel for PR team: articles count, publication targeting -->
+    <div class="card">
+      <h2>3. Coverage intel for PR team (Coverage)</h2>
+      <p class="source">Source: Coverage page — Articles count, Publication targeting</p>
+      <p class="section-summary">Article volume and where each brand is (or isn’t) present—publication targeting for outreach.</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Brand</th>
+            <th class="num">Articles (7d)</th>
+            <th class="num">Sources with coverage</th>
+            <th>Top publications</th>
+            <th>Gap (outlets to target)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="brand-name">Sahi</td><td class="num">24</td><td class="num">12</td><td>Moneycontrol, LiveMint, Finacial Express</td><td>ET, BS, Reuters</td></tr>
+          <tr><td class="brand-name">Zerodha</td><td class="num">52</td><td class="num">18</td><td>ET, Moneycontrol, BS, Reuters</td><td>—</td></tr>
+          <tr><td class="brand-name">Dhan</td><td class="num">14</td><td class="num">8</td><td>Moneycontrol, Inc42</td><td>ET, BS, LiveMint</td></tr>
+          <tr><td class="brand-name">Groww</td><td class="num">48</td><td class="num">16</td><td>ET, Moneycontrol, BS, Social</td><td>—</td></tr>
+          <tr><td class="brand-name">Kotak Securities</td><td class="num">22</td><td class="num">10</td><td>ET, BS, Moneycontrol</td><td>LiveMint, Social</td></tr>
+        </tbody>
+      </table>
+      <p class="data-quality">Articles: deduplicated by URL. Publication targeting: from coverage-by-source; gap = outlets where competitors appear but brand does not.</p>
+    </div>
+
+    <!-- 4. PR opportunities (Action / Opportunity page) -->
+    <div class="card">
+      <h2>4. PR opportunities (Action / Opportunity)</h2>
+      <p class="source">Source: Opportunities page — Quote alerts, Publication gaps, Outreach</p>
+      <p class="section-summary">Actionable items: quote alerts, publication-targeting gaps, and suggested outreach. Count and top items across brands.</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Brand</th>
+            <th class="num">Quote alerts</th>
+            <th class="num">Pub. gaps</th>
+            <th>Top opportunity</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="brand-name">Sahi</td><td class="num">2</td><td class="num">3</td><td>Pitch derivatives story to ET, Moneycontrol (competitors cited this week).</td></tr>
+          <tr><td class="brand-name">Zerodha</td><td class="num">1</td><td class="num">0</td><td>One quote alert: follow up on Kite update coverage.</td></tr>
+          <tr><td class="brand-name">Dhan</td><td class="num">1</td><td class="num">4</td><td>Four outlets with no Dhan coverage; prioritize LiveMint, BS.</td></tr>
+          <tr><td class="brand-name">Groww</td><td class="num">0</td><td class="num">0</td><td>—</td></tr>
+          <tr><td class="brand-name">Kotak Securities</td><td class="num">1</td><td class="num">2</td><td>Two social-heavy outlets under-indexed; consider influencer/earned mix.</td></tr>
+        </tbody>
+      </table>
+      <p class="data-quality">From PR opportunities pipeline. Quote alerts = mentions where expert quote could be placed; pub. gaps = sources with competitor coverage but not brand.</p>
+    </div>
+
+    <!-- 5. PR Intelligence 7-day synopsis -->
+    <div class="card">
+      <h2>5. PR Intelligence — 7-day synopsis</h2>
+      <p class="source">Source: PR Intelligence page — 7-day summary</p>
+      <p class="section-summary">One-paragraph synopsis of PR-relevant intelligence over the last 7 days (per brand or combined).</p>
+      <table>
+        <thead>
+          <tr><th>Brand</th><th>7-day synopsis</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="brand-name">Sahi</td><td>Coverage focused on options trading and platform updates; two tier-2 pickups. No tier-1 quote; one competitor (Zerodha) cited in “best broker” roundups. Sentiment neutral to positive.</td></tr>
+          <tr><td class="brand-name">Zerodha</td><td>Strong tier-1 presence; Kite and product updates widely cited. One regulatory mention (neutral). Share of voice highest in “discount broker” and “trading app” narratives.</td></tr>
+          <tr><td class="brand-name">Dhan</td><td>Limited mainstream coverage; social and community mentions up. One negative thread on support; opportunity to pitch “platform reliability” angle.</td></tr>
+          <tr><td class="brand-name">Groww</td><td>Leading in social and news SOV. IPO and growth narrative still present; derivatives and trading features increasingly mentioned alongside Zerodha.</td></tr>
+          <tr><td class="brand-name">Kotak Securities</td><td>Traditional media strong; social SOV low. Few comparison pieces include Kotak; opportunity in “full-service vs discount” and “research + execution” angles.</td></tr>
+        </tbody>
+      </table>
+      <p class="data-quality">Synopsis generated from PR Intelligence pipeline (mentions, coverage, sentiment). Last 7 days rolling.</p>
+    </div>
+
+    <!-- 6. Narrative shift + PR brief (per company) -->
+    <div class="card">
+      <h2>6. Narrative shift & PR brief (per company)</h2>
+      <p class="source">Source: Narrative Shift, Narrative Positioning (PR brief)</p>
+      <p class="section-summary">Narrative shift: dominant themes in the landscape. PR brief: positioning and recommended angles per brand (from Narrative Positioning page).</p>
+      <table>
+        <thead>
+          <tr><th>Brand</th><th>Narrative shift (top themes)</th><th>PR brief (2–3 lines)</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="brand-name">Sahi</td>
+            <td><span class="narrative-headline">Zero brokerage, ease of use, derivatives</span> Themes from Reddit + YouTube + news clusters.</td>
+            <td><div class="pr-brief-block">Position on “ease of use” and “options-first” to differentiate from Zerodha. Suggested outlets: Moneycontrol, LiveMint. Three content angles: articles (derivatives tools), YouTube (platform demo), Reddit (trader community).</div></td>
+          </tr>
+          <tr>
+            <td class="brand-name">Zerodha</td>
+            <td><span class="narrative-headline">Market leader, Kite, regulatory</span> Dominant in “Zerodha alternative” and “best broker” conversations.</td>
+            <td><div class="pr-brief-block">Defend leadership narrative; counter “alternatives” with product depth and reliability. Watch competitor messaging on derivatives and pricing. One threat: Groww gaining in social SOV.</div></td>
+          </tr>
+          <tr>
+            <td class="brand-name">Dhan</td>
+            <td><span class="narrative-headline">Trading platform, API, active traders</span> Niche in trader communities; limited mainstream narrative.</td>
+            <td><div class="pr-brief-block">Build tier-1 presence with “active trader” and “API/platform” angles. Address support sentiment with proof points. Opportunities: LiveMint, BS, Inc42.</div></td>
+          </tr>
+          <tr>
+            <td class="brand-name">Groww</td>
+            <td><span class="narrative-headline">Growth, IPO, investing + trading</span> Strong in both “investing” and “trading” narratives.</td>
+            <td><div class="pr-brief-block">Leverage SOV lead; push “trading + investing” combined story. Position against Zerodha in “ease for beginners” and “mobile-first.” Content: YouTube and Reddit alongside news.</div></td>
+          </tr>
+          <tr>
+            <td class="brand-name">Kotak Securities</td>
+            <td><span class="narrative-headline">Full-service, research, institutional</span> Present in traditional finance coverage; absent in “discount broker” comparisons.</td>
+            <td><div class="pr-brief-block">Enter “best broker” and “Zerodha alternative” conversations with “full-service + research” differentiation. Target ET, BS, Moneycontrol for thought leadership. One opportunity: comparison pieces that include hybrid (discount + research) positioning.</div></td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="data-quality">Narrative shift from Narrative Shift pipeline (clusters + themes). PR brief from Narrative Positioning (1 run per brand per week).</p>
+    </div>
+
+    <!-- 7. AI Search Visibility (kept from before) -->
+    <div class="card">
+      <h2>7. AI Search Visibility — comparison</h2>
+      <p class="source">Source: AI Search Visibility page</p>
+      <p class="section-summary">Overall visibility index and prompt-group scores in AI answers (e.g. Perplexity). All five brands in one view.</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Brand</th>
+            <th class="num">Overall index</th>
+            <th class="num">Broker discovery</th>
+            <th class="num">Zerodha alt.</th>
+            <th class="num">Feature</th>
+            <th class="num">Problem</th>
+            <th class="num">Comparison</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="brand-name">Sahi</td><td class="num">35%</td><td class="num">15%</td><td class="num">45%</td><td class="num">35%</td><td class="num">25%</td><td class="num">55%</td></tr>
+          <tr><td class="brand-name">Zerodha</td><td class="num">72%</td><td class="num">80%</td><td class="num">95%</td><td class="num">70%</td><td class="num">65%</td><td class="num">75%</td></tr>
+          <tr><td class="brand-name">Dhan</td><td class="num">28%</td><td class="num">20%</td><td class="num">30%</td><td class="num">35%</td><td class="num">25%</td><td class="num">30%</td></tr>
+          <tr><td class="brand-name">Groww</td><td class="num">58%</td><td class="num">55%</td><td class="num">50%</td><td class="num">60%</td><td class="num">55%</td><td class="num">70%</td></tr>
+          <tr><td class="brand-name">Kotak Securities</td><td class="num">42%</td><td class="num">40%</td><td class="num">35%</td><td class="num">45%</td><td class="num">40%</td><td class="num">50%</td></tr>
+        </tbody>
+      </table>
+      <p class="data-quality">Based on curated prompt groups; weekly run. Index = % of prompts where brand appeared in AI answer.</p>
+    </div>
+
+    <p class="foot">Mockup — Executive Competitor Intelligence. All sections sourced from existing app: Pulse (Reputation & Sentiment), Media Intelligence (PR summary, Share of voice), Coverage (articles, publication targeting), Opportunities (PR opportunities), PR Intelligence (7d synopsis), Narrative Shift & PR brief, AI Search Visibility. No new pipelines; one report, five brands. Data quality and granularity as noted per section.</p>
+  </div>
+</body>
+</html>

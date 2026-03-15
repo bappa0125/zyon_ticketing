@@ -48,14 +48,24 @@ def get_competitor_names(client_obj: dict[str, Any]) -> list[str]:
     return [n for c in competitors if (n := _competitor_name(c))]
 
 
-def _load_clients_from_file() -> list[dict[str, Any]]:
-    """Read and parse config/clients.yaml. Called only when cache miss."""
-    # Try project_root/config (local) then /app/config (Docker)
+def _get_config_dir() -> Path:
     project_root = Path(__file__).resolve().parent.parent.parent
     config_dir = project_root / "config"
     if not config_dir.exists():
         config_dir = Path("/app/config")
-    path = config_dir / "clients.yaml"
+    return config_dir
+
+
+def _load_clients_from_file() -> list[dict[str, Any]]:
+    """Read and parse clients from config. Uses executive_competitor_analysis.yml when enabled, else clients.yaml."""
+    config_dir = _get_config_dir()
+    cfg = get_config()
+    exec_cfg = cfg.get("executive_competitor_analysis") or {}
+    if isinstance(exec_cfg, dict) and exec_cfg.get("use_this_file"):
+        filename = (exec_cfg.get("clients_file") or "executive_competitor_analysis.yml").strip()
+        path = config_dir / filename
+    else:
+        path = config_dir / "clients.yaml"
     if not path.exists():
         logger.warning("clients_config_file_not_found", path=str(path))
         return []

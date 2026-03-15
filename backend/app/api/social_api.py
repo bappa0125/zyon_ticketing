@@ -161,7 +161,119 @@ async def refresh_youtube_narrative():
     return result
 
 
+# --- AI Search Narrative (Perplexity answers for fixed queries → Narrative Analytics) ---
+
+@router.get("/social/ai-search-answers")
+async def get_ai_search_answers(days: int = 7, query: Optional[str] = None):
+    """
+    Return stored AI search answers (e.g. Perplexity) for the last N days.
+    Optional ?query= substring to filter by search query text.
+    """
+    from app.services.ai_search_narrative_service import load_ai_search_answers
+    await get_mongo_client()
+    answers = await load_ai_search_answers(days=min(days, 90), query_filter=query)
+    return {"answers": answers, "pipeline": "ai_search_narrative"}
+
+
+@router.post("/social/ai-search-narrative/refresh")
+async def refresh_ai_search_narrative():
+    """Run the AI search narrative pipeline (fixed queries via Perplexity → store answers)."""
+    from app.services.ai_search_narrative_service import run_ai_search_narrative_pipeline
+    from app.config import get_config
+    asc_cfg = get_config().get("ai_search_narrative")
+    if not isinstance(asc_cfg, dict) or not asc_cfg.get("enabled", False):
+        raise HTTPException(status_code=403, detail="ai_search_narrative disabled")
+    result = await run_ai_search_narrative_pipeline()
+    return result
+
+
+# --- AI Search Visibility Monitoring (Phase 1) — CXO dashboard ---
+
+@router.get("/social/ai-search-visibility/dashboard")
+async def get_ai_search_visibility_dashboard(client: str, weeks: int = 8):
+    """
+    Return dashboard data for one client: latest snapshot, trend (last N weeks), recommendations.
+    """
+    if not client or not client.strip():
+        raise HTTPException(status_code=400, detail="client required")
+    from app.services.ai_search_visibility_service import load_dashboard
+    await get_mongo_client()
+    data = await load_dashboard(client=client.strip(), weeks=min(weeks, 52))
+    return data
+
+
+@router.post("/social/ai-search-visibility/refresh")
+async def refresh_ai_search_visibility():
+    """Run the AI Search Visibility pipeline (weekly prompts via Perplexity, entity detection, snapshots)."""
+    from app.services.ai_search_visibility_service import run_visibility_pipeline
+    from app.config import get_config
+    vis_cfg = get_config().get("ai_search_visibility")
+    if not isinstance(vis_cfg, dict) or not vis_cfg.get("enabled", False):
+        raise HTTPException(status_code=403, detail="ai_search_visibility disabled")
+    result = await run_visibility_pipeline()
+    return result
+
+
 # --- Sahi strategic brief (1–2 suggestions from themes, mentions, topics, competitors) ---
+
+@router.get("/social/forum-mentions")
+async def get_forum_mentions(
+    entity: Optional[str] = None,
+    limit: int = 50,
+    range_days: int = 14,
+):
+    """
+    Return entity_mentions where type=forum (traderji, tradingqna, valuepickr, etc.).
+    Optional ?entity= to filter by brand/competitor name.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    await get_mongo_client()
+    from app.services.mongodb import get_db
+
+    db = get_db()
+    coll = db["entity_mentions"]
+    cutoff = datetime.now(timezone.utc) - timedelta(days=min(range_days, 90))
+    query: dict = {
+        "type": "forum",
+        "$or": [
+            {"published_at": {"$gte": cutoff}},
+            {"timestamp": {"$gte": cutoff}},
+        ],
+    }
+    if entity and entity.strip():
+        query["entity"] = entity.strip()
+    cursor = coll.find(query).sort("published_at", -1).limit(min(limit, 200))
+    mentions = []
+    async for doc in cursor:
+        pub = doc.get("published_at") or doc.get("timestamp")
+        pub_str = pub.isoformat() if hasattr(pub, "isoformat") else str(pub or "")
+        mentions.append({
+            "entity": doc.get("entity", ""),
+            "title": (doc.get("title") or "")[:500],
+            "summary": (doc.get("summary") or doc.get("snippet") or "")[:400],
+            "source_domain": doc.get("source_domain", ""),
+            "url": doc.get("url", ""),
+            "published_at": pub_str,
+            "sentiment": doc.get("sentiment"),
+        })
+    return {"mentions": mentions, "count": len(mentions)}
+
+
+@router.get("/social/forum-mentions/topics")
+async def get_forum_topics_traction(
+    client: Optional[str] = None,
+    range_days: int = 14,
+    top_n: int = 15,
+):
+    """
+    Return topics with highest traction in forum mentions (type=forum).
+    Optional ?client= to filter by brand; topics are joined from article_documents.
+    """
+    from app.services.forum_traction_service import get_forum_topics_traction as _get
+    await get_mongo_client()
+    return await _get(client=client or None, range_days=min(range_days, 90), top_n=min(top_n, 50))
+
 
 @router.get("/social/sahi-strategic-brief")
 async def get_sahi_strategic_brief(use_cache: bool = True):

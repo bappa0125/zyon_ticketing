@@ -35,6 +35,7 @@ const NAV_STRUCTURE: (NavLink | NavGroup)[] = [
           { href: "/opportunities", label: "Opportunities" },
           { href: "/pr-intelligence", label: "PR Intelligence" },
           { href: "/reports", label: "Reports" },
+          { href: "/reports/executive-report", label: "Executive Report" },
         ],
       },
   { href: "/clients", label: "Clients" },
@@ -42,8 +43,10 @@ const NAV_STRUCTURE: (NavLink | NavGroup)[] = [
     label: "Social",
     items: [
       { href: "/social", label: "Social" },
+      { href: "/social/forums", label: "Forum mentions" },
       { href: "/social/narrative-shift", label: "Narrative Shift" },
       { href: "/social/narrative-intelligence", label: "Narrative Positioning" },
+      { href: "/social/ai-search-narrative", label: "AI Search Visibility" },
     ],
   },
 ];

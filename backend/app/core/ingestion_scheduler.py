@@ -291,6 +291,51 @@ def _job_coverage_pr_summary():
         logger.exception("scheduler_job_failed", job="coverage_pr_summary", error=str(e))
 
 
+def _job_ai_search_narrative():
+    """Scheduled job: AI search narrative — run fixed queries via Perplexity, store answers. Once per day."""
+    if _skip_if_backfill("ai_search_narrative"):
+        return
+    asc_cfg = get_config().get("ai_search_narrative")
+    if not isinstance(asc_cfg, dict) or not asc_cfg.get("enabled", False):
+        return
+    from app.services.ai_search_narrative_service import run_ai_search_narrative_pipeline
+    logger.info("scheduler_job_start", job="ai_search_narrative")
+    try:
+        result = asyncio.run(run_ai_search_narrative_pipeline())
+        logger.info("scheduler_job_complete", job="ai_search_narrative", result=result)
+    except Exception as e:
+        logger.exception("scheduler_job_failed", job="ai_search_narrative", error=str(e))
+
+
+def _job_ai_search_visibility():
+    """Scheduled job: AI Search Visibility (Phase 1) — weekly run, cache by (client, query, engine, week)."""
+    if _skip_if_backfill("ai_search_visibility"):
+        return
+    vis_cfg = get_config().get("ai_search_visibility")
+    if not isinstance(vis_cfg, dict) or not vis_cfg.get("enabled", False):
+        return
+    from app.services.ai_search_visibility_service import run_visibility_pipeline
+    logger.info("scheduler_job_start", job="ai_search_visibility")
+    try:
+        result = asyncio.run(run_visibility_pipeline())
+        logger.info("scheduler_job_complete", job="ai_search_visibility", result=result)
+    except Exception as e:
+        logger.exception("scheduler_job_failed", job="ai_search_visibility", error=str(e))
+
+
+def _job_executive_competitor_report():
+    """Scheduled job: Build and store Executive Competitor Intelligence report (no LLM). Weekly after visibility."""
+    if _skip_if_backfill("executive_competitor_report"):
+        return
+    logger.info("scheduler_job_start", job="executive_competitor_report")
+    try:
+        from app.services.executive_report_service import build_and_save_executive_report
+        result = asyncio.run(build_and_save_executive_report(range_param="7d"))
+        logger.info("scheduler_job_complete", job="executive_competitor_report", result=result)
+    except Exception as e:
+        logger.exception("scheduler_job_failed", job="executive_competitor_report", error=str(e))
+
+
 def _job_youtube_narrative():
     """Scheduled job: YouTube narrative pipeline (YouTube API + 1 LLM call → daily summary)."""
     if _skip_if_backfill("youtube_narrative_daily"):
@@ -369,6 +414,36 @@ def start_scheduler():
         _scheduler.add_job(_job_coverage_pr_summary, "cron", hour=10, minute=0, id="coverage_pr_summary_daily")
     except Exception as e:
         logger.warning("coverage_pr_summary_daily job not scheduled", error=str(e))
+    asc_cfg = cfg.get("ai_search_narrative")
+    if isinstance(asc_cfg, dict) and asc_cfg.get("enabled", False):
+        try:
+            _scheduler.add_job(_job_ai_search_narrative, "cron", hour=10, minute=30, id="ai_search_narrative_daily")
+        except Exception as e:
+            logger.warning("ai_search_narrative_daily job not scheduled", error=str(e))
+    vis_cfg = cfg.get("ai_search_visibility")
+    if isinstance(vis_cfg, dict) and vis_cfg.get("enabled", False):
+        try:
+            _scheduler.add_job(
+                _job_ai_search_visibility,
+                "cron",
+                day_of_week="sun",
+                hour=2,
+                minute=0,
+                id="ai_search_visibility_weekly",
+            )
+        except Exception as e:
+            logger.warning("ai_search_visibility_weekly job not scheduled", error=str(e))
+    try:
+        _scheduler.add_job(
+            _job_executive_competitor_report,
+            "cron",
+            day_of_week="sun",
+            hour=3,
+            minute=0,
+            id="executive_competitor_report_weekly",
+        )
+    except Exception as e:
+        logger.warning("executive_competitor_report_weekly job not scheduled", error=str(e))
 
     # Run RSS once shortly after start so the queue gets new items without waiting 4h
     _scheduler.add_job(

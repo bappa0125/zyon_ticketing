@@ -1,6 +1,12 @@
 # Development configuration
 # Loaded when APP_ENV=dev
 
+# Executive Competitor Analysis: use the 5-client set (Zerodha, Dhan, Groww, Kotak Securities, Sahi) for pipelines and report.
+# Set to true to run backfill/report for these five only; false to use config/clients.yaml.
+executive_competitor_analysis:
+  use_this_file: true
+  clients_file: executive_competitor_analysis.yml
+
 # Ingestion scheduler (runs in backend process)
 scheduler:
   enabled: true
@@ -198,3 +204,39 @@ narrative_positioning:
   enabled: true
   llm:
     model: openrouter/free
+
+# AI Search Narrative — track what AI search (e.g. Perplexity) returns for fixed queries.
+# Feeds Narrative Analytics / positioning. Rate-limited for free tier.
+ai_search_narrative:
+  enabled: true
+  # Fixed queries to run daily (category/client-relevant). Keep small for free tier (e.g. 5–8/day).
+  search_queries:
+    - best stock trading app India 2024
+    - top discount brokers India
+    - Upstox vs Zerodha vs Groww
+  max_queries_per_run: 6
+  delay_seconds_between_calls: 4
+  provider: perplexity   # uses openrouter web_search_model (perplexity/sonar)
+  mongodb:
+    database: chat
+    answers_collection: ai_search_answers
+  # Optional: extract entities/themes from answers (extra LLM calls; keep 0 to stay free)
+  extraction_max_calls_per_run: 0
+  llm:
+    model: openrouter/free
+
+# AI Search Visibility Monitoring (Phase 1) — CXO dashboard: how visible is the company in AI answers
+ai_search_visibility:
+  enabled: true
+  prompt_groups_file: ai_visibility_prompts.yaml   # under config/
+  max_prompts_per_run: 30
+  max_per_group_per_run: 6
+  delay_seconds_between_calls: 4
+  enabled_engines:
+    - perplexity
+  mongodb:
+    database: chat
+    answers_collection: visibility_answers   # one per (query, engine, week) — shared
+    runs_collection: visibility_runs         # per (client, query, engine, week) — entities_found
+    snapshots_collection: visibility_weekly_snapshots
+    recommendations_collection: visibility_recommendations

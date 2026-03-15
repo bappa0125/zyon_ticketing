@@ -23,6 +23,8 @@ class ChatRequest(BaseModel):
     conversation_id: str
     message: str
     live_search: bool = False  # When True, run only live web search (user clicked "Search the web"); expect 30–40s, possible duplicates
+    db_only: bool = False  # When True, answer from DB only (no Perplexity/web fallback); used for suggested-question hints
+    hint_type: str | None = None  # When set with db_only, append "For more: [Page](path)" at end. One of: mentions, coverage, narrative, sentiment
 
 
 # Step log prefix for temporary debug stream (config: chat.debug_step_stream)
@@ -53,6 +55,23 @@ _TYPE_LABELS = {
 
 # Types considered "forum or social" for filter-only requests
 _FORUM_SOCIAL_TYPES = frozenset(("forum", "reddit", "youtube", "twitter"))
+
+
+def _hint_type_to_link(hint_type: str | None) -> str:
+    """Return a 'For more: [Page](path)' line for suggested-question deep link. None if unknown."""
+    if not hint_type or not isinstance(hint_type, str):
+        return ""
+    t = hint_type.strip().lower()
+    links = {
+        "mentions": ("Media Intelligence", "/media-intelligence"),
+        "coverage": ("Coverage", "/coverage"),
+        "narrative": ("Narrative Positioning", "/social/narrative-intelligence"),
+        "sentiment": ("Sentiment", "/sentiment"),
+    }
+    if t not in links:
+        return ""
+    label, path = links[t]
+    return f"\n\nFor more: [{label}]({path})."
 
 
 def _is_forum_or_social_only_request(message: str) -> bool:
@@ -251,9 +270,10 @@ def build_messages(
     return messages
 
 
-async def chat_stream(conversation_id: str, user_message: str, live_search: bool = False):
+async def chat_stream(conversation_id: str, user_message: str, live_search: bool = False, db_only: bool = False, hint_type: str | None = None):
     """Stream chat response. Uses intent classifier to gate search; OpenRouter :online for search intent.
     When live_search=True, only run web search (user clicked 'Search the web'); show 30–40s disclaimer and results.
+    When db_only=True, never use web search (answer from DB only). When hint_type is set, append 'For more: [Page](path)' at end.
     """
     import asyncio
     from app.services.intent_classifier import classify_intent
@@ -385,9 +405,12 @@ async def chat_stream(conversation_id: str, user_message: str, live_search: bool
                 asyncio.create_task(_store_out_of_scope())
             return
 
-        # Gate: only run search when intent is search (or follow-up with company from context)
+        # Gate: only run search when intent is search (or follow-up with company from context), or when db_only suggested-question
         search_gated = (intent == "search" and (company or mention_entity)) or (intent == "chat" and is_follow_up_request(user_message) and (company or mention_entity))
         use_web_search = search_gated and (search_query is not None or mention_entity is not None) and (company is not None or mention_entity is not None)
+        run_mention_search = use_web_search or (db_only and (search_query or mention_entity or company))
+        if db_only:
+            use_web_search = False  # Suggested-question path: no web fallback; we still run DB search via run_mention_search
         url_results = None
         search_results_streamed_inline = False  # True when DB+live flow streams results directly
         is_follow_up = company and is_follow_up_request(user_message)
@@ -404,7 +427,7 @@ async def chat_stream(conversation_id: str, user_message: str, live_search: bool
             status2 = "Retrieving your questions...\n\n"
             yield status2
             full_response.append(status2)
-        elif use_web_search and (search_query or mention_entity):
+        elif run_mention_search and (search_query or mention_entity):
             line = _step_event("Search gated", f"Query: {search_query or mention_entity}, company: {company or mention_entity}")
             if line:
                 yield line
@@ -517,9 +540,10 @@ async def chat_stream(conversation_id: str, user_message: str, live_search: bool
                         for c in db_formatted:
                             yield c
                             full_response.append(c)
-                    # Signal frontend: show "Search the web" button (may take 30–40s; duplicates possible but ensures nothing missed)
-                    yield "\n[LIVE_SEARCH_AVAILABLE]\n"
-                    full_response.append("\n[LIVE_SEARCH_AVAILABLE]\n")
+                    # Signal frontend: show "Search the web" button (skip when db_only suggested-question path)
+                    if not db_only:
+                        yield "\n[LIVE_SEARCH_AVAILABLE]\n"
+                        full_response.append("\n[LIVE_SEARCH_AVAILABLE]\n")
                     url_results = db_results
                     live_results = []
 
@@ -702,6 +726,14 @@ async def chat_stream(conversation_id: str, user_message: str, live_search: bool
             yield err_msg
             full_response.append(err_msg)
 
+    # Suggested-question deep link: append "For more: [Page](path)" when hint_type is set
+    if hint_type and full_response:
+        link_line = _hint_type_to_link(hint_type)
+        if link_line:
+            for c in link_line:
+                yield c
+            full_response.append(link_line)
+
     # Store assistant response + Qdrant in background - do NOT block stream close
     response_text = "".join(full_response)
     if user_msg_id is not None:
@@ -723,7 +755,13 @@ async def chat(request: ChatRequest):
         raise HTTPException(status_code=400, detail="conversation_id and message required")
 
     return StreamingResponse(
-        chat_stream(request.conversation_id, request.message, request.live_search),
+        chat_stream(
+            request.conversation_id,
+            request.message,
+            request.live_search,
+            db_only=request.db_only,
+            hint_type=request.hint_type,
+        ),
         media_type="text/plain; charset=utf-8",
         headers={"X-Accel-Buffering": "no"},
     )

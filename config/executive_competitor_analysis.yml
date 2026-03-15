@@ -1,0 +1,127 @@
+# Executive Competitor Analysis — client set for CXO report
+# Used when executive_competitor_analysis.use_this_file is true (see dev.yaml).
+# All client/alias/ignore_patterns taken from clients.yaml for: Zerodha, Dhan, Groww, Kotak Securities, Sahi.
+# Each client lists the other four as competitors so pipelines run per brand.
+
+clients:
+  - name: Sahi
+    domain: sahi.com
+    aliases:
+      - sahi
+      - sahi trading
+      - sahi trading app
+      - sahi brokerage
+      - sahi derivatives
+      - sahi investment app
+      - sahi trading platform
+      - sahi options trading
+      - sahi app
+      - sahi fintech
+      - sahi stock trading
+      - sahi broker
+      - sahi investing platform
+      - sahi discount broker
+      - sahi capital markets
+      - sahi retail trading app
+      - sahi derivatives trading
+      - sahi markets platform
+    ignore_patterns:
+      - sahi hai
+      - bilkul sahi
+      - sahi baat
+      - bilkul sahi hai
+      - sahi kaha
+      - theek sahi
+      - sahi ai app
+      - sahi bola
+    competitors:
+      - name: Zerodha
+      - name: Dhan
+      - name: Groww
+      - name: Kotak Securities
+
+  - name: Zerodha
+    domain: zerodha.com
+    aliases:
+      - zerodha
+      - zerodha kite
+      - kite
+      - kite trading
+      - kite trading app
+      - zerodha brokerage
+      - zerodha trading platform
+      - zerodha demat
+    ignore_patterns:
+      - kite festival
+      - flying kite
+      - kite flying
+      - kite festival india
+    competitors:
+      - name: Sahi
+      - name: Dhan
+      - name: Groww
+      - name: Kotak Securities
+
+  - name: Dhan
+    domain: dhan.co
+    aliases:
+      - dhan
+      - dhan trading
+      - dhan brokerage
+      - dhan app
+      - dhan trading platform
+    ignore_patterns:
+      - dhanteras
+      - dhan yog
+      - dhan astrology
+      - dhan mantra
+      - dhan festival
+      - dhanush
+    competitors:
+      - name: Sahi
+      - name: Zerodha
+      - name: Groww
+      - name: Kotak Securities
+
+  - name: Groww
+    domain: groww.in
+    aliases:
+      - groww
+      - groww app
+      - groww investment app
+      - groww trading
+      - groww brokerage
+      - groww demat
+    ignore_patterns:
+      - grow
+      - growing
+      - grow business
+      - grow revenue
+      - grow your wealth
+      - grow your business
+      - grow economy
+    competitors:
+      - name: Sahi
+      - name: Zerodha
+      - name: Dhan
+      - name: Kotak Securities
+
+  - name: Kotak Securities
+    domain: kotaksecurities.com
+    aliases:
+      - kotak securities
+      - kotak trading
+      - kotak brokerage
+      - kotak stock trading
+      - kotak securities ltd
+    ignore_patterns:
+      - kotak mahindra bank
+      - kotak bank
+      - kotak insurance
+      - kotak mutual fund
+      - kotak credit card
+    competitors:
+      - name: Sahi
+      - name: Zerodha
+      - name: Dhan
+      - name: Groww

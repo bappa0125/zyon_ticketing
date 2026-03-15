@@ -16,7 +16,7 @@ Options:
   --dry-run         Print what would run, do not execute
   --skip PHASE      Skip phase(s): rss, article, entity, sentiment, topics,
                     ai_summary, reddit, youtube, reddit_trending, youtube_narrative,
-                    narrative_shift, narrative_daily, sahi, ai_brief, crawler, forum
+                    narrative_shift, narrative_daily, coverage_summary, sahi, ai_brief, crawler, forum
   --skip-deps       Skip optional dependency checks (Redis, Qdrant)
 """
 from __future__ import annotations
@@ -88,13 +88,9 @@ async def check_redis() -> bool:
         return False
 
 
-def run_async(coro):
-    return asyncio.run(coro)
+# --- Async phase runners: all run in one event loop to avoid "Event loop is closed" ---
 
-
-# --- Phase runners (mirror ingestion_scheduler logic) ---
-
-def _phase_rss(state: RunState) -> StepResult:
+async def _phase_rss_async(state: RunState) -> StepResult:
     start = time.monotonic()
     if state.dry_run:
         return StepResult("rss", True, 0, "dry-run")
@@ -102,13 +98,13 @@ def _phase_rss(state: RunState) -> StepResult:
         from app.services.monitoring_ingestion.rss_ingestion import run_rss_ingestion
         cfg = __import__("app.config", fromlist=["get_config"]).get_config()
         max_feeds = (cfg.get("scheduler") or {}).get("rss_max_feeds_per_run", 20)
-        result = run_async(run_rss_ingestion(max_feeds=max_feeds))
+        result = await run_rss_ingestion(max_feeds=max_feeds)
         return StepResult("rss", True, time.monotonic() - start, result=str(result))
     except Exception as e:
         return StepResult("rss", False, time.monotonic() - start, message=str(e))
 
 
-def _phase_article_fetcher(state: RunState) -> StepResult:
+async def _phase_article_fetcher_async(state: RunState) -> StepResult:
     start = time.monotonic()
     if state.dry_run:
         return StepResult("article_fetcher", True, 0, "dry-run")
@@ -116,13 +112,13 @@ def _phase_article_fetcher(state: RunState) -> StepResult:
         from app.services.monitoring_ingestion.article_fetcher import run_article_fetcher
         cfg = __import__("app.config", fromlist=["get_config"]).get_config()
         max_items = (cfg.get("scheduler") or {}).get("article_fetcher_max_items_per_run", 40)
-        result = run_async(run_article_fetcher(max_items=max_items))
+        result = await run_article_fetcher(max_items=max_items)
         return StepResult("article_fetcher", True, time.monotonic() - start, result=str(result))
     except Exception as e:
         return StepResult("article_fetcher", False, time.monotonic() - start, message=str(e))
 
 
-def _phase_entity_mentions(state: RunState) -> StepResult:
+async def _phase_entity_mentions_async(state: RunState) -> StepResult:
     start = time.monotonic()
     if state.dry_run:
         return StepResult("entity_mentions", True, 0, "dry-run")
@@ -130,25 +126,25 @@ def _phase_entity_mentions(state: RunState) -> StepResult:
         from app.services.entity_mentions_worker import run_entity_mentions_pipeline
         cfg = __import__("app.config", fromlist=["get_config"]).get_config()
         batch = (cfg.get("scheduler") or {}).get("entity_mentions_batch_size", 150)
-        result = run_async(run_entity_mentions_pipeline(batch_size=batch))
+        result = await run_entity_mentions_pipeline(batch_size=batch)
         return StepResult("entity_mentions", True, time.monotonic() - start, result=str(result))
     except Exception as e:
         return StepResult("entity_mentions", False, time.monotonic() - start, message=str(e))
 
 
-def _phase_entity_sentiment(state: RunState) -> StepResult:
+async def _phase_entity_sentiment_async(state: RunState) -> StepResult:
     start = time.monotonic()
     if state.dry_run:
         return StepResult("entity_sentiment", True, 0, "dry-run")
     try:
         from app.services.entity_mentions_sentiment_worker import run_entity_mentions_sentiment
-        result = run_async(run_entity_mentions_sentiment(batch_size=50))
+        result = await run_entity_mentions_sentiment(batch_size=50)
         return StepResult("entity_sentiment", True, time.monotonic() - start, result=str(result))
     except Exception as e:
         return StepResult("entity_sentiment", False, time.monotonic() - start, message=str(e))
 
 
-def _phase_article_topics(state: RunState) -> StepResult:
+async def _phase_article_topics_async(state: RunState) -> StepResult:
     start = time.monotonic()
     if state.dry_run:
         return StepResult("article_topics", True, 0, "dry-run")
@@ -156,49 +152,50 @@ def _phase_article_topics(state: RunState) -> StepResult:
         from app.services.article_topics_worker import run_article_topics_pipeline
         cfg = __import__("app.config", fromlist=["get_config"]).get_config()
         batch = (cfg.get("scheduler") or {}).get("article_topics_batch_size", 30)
-        result = run_async(run_article_topics_pipeline(batch_size=batch))
+        result = await run_article_topics_pipeline(batch_size=batch)
         return StepResult("article_topics", True, time.monotonic() - start, result=str(result))
     except Exception as e:
         return StepResult("article_topics", False, time.monotonic() - start, message=str(e))
 
 
-def _phase_ai_summary(state: RunState) -> StepResult:
+async def _phase_ai_summary_async(state: RunState) -> StepResult:
     start = time.monotonic()
     if state.dry_run:
         return StepResult("ai_summary", True, 0, "dry-run")
     try:
         from app.services.ai_summary_worker import run_ai_summary_worker
-        result = run_async(run_ai_summary_worker())
+        result = await run_ai_summary_worker()
         return StepResult("ai_summary", True, time.monotonic() - start, result=str(result))
     except Exception as e:
         return StepResult("ai_summary", False, time.monotonic() - start, message=str(e))
 
 
-def _phase_reddit_monitor(state: RunState) -> StepResult:
+async def _phase_reddit_monitor_async(state: RunState) -> StepResult:
     start = time.monotonic()
     if state.dry_run:
         return StepResult("reddit_monitor", True, 0, "dry-run")
     try:
         from app.services.reddit_worker import run_reddit_monitor
-        result = run_async(run_reddit_monitor())
+        result = await run_reddit_monitor()
         return StepResult("reddit_monitor", True, time.monotonic() - start, result=str(result))
     except Exception as e:
         return StepResult("reddit_monitor", False, time.monotonic() - start, message=str(e))
 
 
-def _phase_youtube_monitor(state: RunState) -> StepResult:
+async def _phase_youtube_monitor_async(state: RunState) -> StepResult:
     start = time.monotonic()
     if state.dry_run:
         return StepResult("youtube_monitor", True, 0, "dry-run")
     try:
         from app.services.youtube_worker import run_youtube_monitor
-        result = run_async(run_youtube_monitor())
+        result = await run_youtube_monitor()
         return StepResult("youtube_monitor", True, time.monotonic() - start, result=str(result))
     except Exception as e:
         return StepResult("youtube_monitor", False, time.monotonic() - start, message=str(e))
 
 
-def _phase_crawler_enqueue(state: RunState) -> StepResult:
+def _phase_crawler_enqueue_sync(state: RunState) -> StepResult:
+    """Sync phase (no MongoDB/Redis in hot path)."""
     start = time.monotonic()
     if state.dry_run:
         return StepResult("crawler_enqueue", True, 0, "dry-run")
@@ -210,19 +207,19 @@ def _phase_crawler_enqueue(state: RunState) -> StepResult:
         return StepResult("crawler_enqueue", False, time.monotonic() - start, message=str(e))
 
 
-def _phase_forum_ingestion(state: RunState) -> StepResult:
+async def _phase_forum_ingestion_async(state: RunState) -> StepResult:
     start = time.monotonic()
     if state.dry_run:
         return StepResult("forum_ingestion", True, 0, "dry-run")
     try:
         from app.services.forum_ingestion_worker import run_forum_ingestion
-        result = run_async(run_forum_ingestion())
+        result = await run_forum_ingestion()
         return StepResult("forum_ingestion", True, time.monotonic() - start, result=str(result))
     except Exception as e:
         return StepResult("forum_ingestion", False, time.monotonic() - start, message=str(e))
 
 
-def _phase_reddit_trending(state: RunState) -> StepResult:
+async def _phase_reddit_trending_async(state: RunState) -> StepResult:
     cfg = __import__("app.config", fromlist=["get_config"]).get_config()
     if not (cfg.get("reddit_trending") or {}).get("enabled", False):
         return StepResult("reddit_trending", True, 0, "skipped (disabled in config)")
@@ -231,13 +228,13 @@ def _phase_reddit_trending(state: RunState) -> StepResult:
         return StepResult("reddit_trending", True, 0, "dry-run")
     try:
         from app.services.reddit_trending_service import run_reddit_trending_pipeline
-        result = run_async(run_reddit_trending_pipeline())
+        result = await run_reddit_trending_pipeline()
         return StepResult("reddit_trending", True, time.monotonic() - start, result=str(result))
     except Exception as e:
         return StepResult("reddit_trending", False, time.monotonic() - start, message=str(e))
 
 
-def _phase_youtube_narrative(state: RunState) -> StepResult:
+async def _phase_youtube_narrative_async(state: RunState) -> StepResult:
     cfg = __import__("app.config", fromlist=["get_config"]).get_config()
     yt = cfg.get("youtube_trending") or {}
     if not (isinstance(yt, dict) and yt.get("enabled", False)):
@@ -247,13 +244,13 @@ def _phase_youtube_narrative(state: RunState) -> StepResult:
         return StepResult("youtube_narrative", True, 0, "dry-run")
     try:
         from app.services.youtube_trending_service import run_youtube_narrative_pipeline
-        result = run_async(run_youtube_narrative_pipeline())
+        result = await run_youtube_narrative_pipeline()
         return StepResult("youtube_narrative", True, time.monotonic() - start, result=str(result))
     except Exception as e:
         return StepResult("youtube_narrative", False, time.monotonic() - start, message=str(e))
 
 
-def _phase_narrative_shift(state: RunState) -> StepResult:
+async def _phase_narrative_shift_async(state: RunState) -> StepResult:
     cfg = __import__("app.config", fromlist=["get_config"]).get_config()
     ns = cfg.get("narrative_shift") or {}
     if not (isinstance(ns, dict) and ns.get("enabled", False)):
@@ -263,13 +260,13 @@ def _phase_narrative_shift(state: RunState) -> StepResult:
         return StepResult("narrative_shift", True, 0, "dry-run")
     try:
         from app.services.narrative_shift_service import run_narrative_shift_pipeline
-        result = run_async(run_narrative_shift_pipeline())
+        result = await run_narrative_shift_pipeline()
         return StepResult("narrative_shift", True, time.monotonic() - start, result=str(result))
     except Exception as e:
         return StepResult("narrative_shift", False, time.monotonic() - start, message=str(e))
 
 
-def _phase_narrative_daily(state: RunState) -> StepResult:
+async def _phase_narrative_daily_async(state: RunState) -> StepResult:
     cfg = __import__("app.config", fromlist=["get_config"]).get_config()
     nid = cfg.get("narrative_intelligence_daily") or {}
     if not (isinstance(nid, dict) and nid.get("enabled", False)):
@@ -279,31 +276,44 @@ def _phase_narrative_daily(state: RunState) -> StepResult:
         return StepResult("narrative_daily", True, 0, "dry-run")
     try:
         from app.services.narrative_intelligence_daily_service import run_daily_synthesis
-        result = run_async(run_daily_synthesis())
+        result = await run_daily_synthesis()
         return StepResult("narrative_daily", True, time.monotonic() - start, result=str(result))
     except Exception as e:
         return StepResult("narrative_daily", False, time.monotonic() - start, message=str(e))
 
 
-def _phase_sahi(state: RunState) -> StepResult:
+async def _phase_coverage_summary_async(state: RunState) -> StepResult:
+    """Coverage PR summary: 1 LLM call per client per day; summarizes page results for PR team."""
+    start = time.monotonic()
+    if state.dry_run:
+        return StepResult("coverage_summary", True, 0, "dry-run")
+    try:
+        from app.services.coverage_pr_summary_service import run_coverage_pr_summary_batch
+        result = await run_coverage_pr_summary_batch()
+        return StepResult("coverage_summary", True, time.monotonic() - start, result=str(result))
+    except Exception as e:
+        return StepResult("coverage_summary", False, time.monotonic() - start, message=str(e))
+
+
+async def _phase_sahi_async(state: RunState) -> StepResult:
     start = time.monotonic()
     if state.dry_run:
         return StepResult("sahi_strategic_brief", True, 0, "dry-run")
     try:
         from app.services.sahi_strategic_brief_service import run_sahi_strategic_brief_daily
-        result = run_async(run_sahi_strategic_brief_daily())
+        result = await run_sahi_strategic_brief_daily()
         return StepResult("sahi_strategic_brief", True, time.monotonic() - start, result=str(result))
     except Exception as e:
         return StepResult("sahi_strategic_brief", False, time.monotonic() - start, message=str(e))
 
 
-def _phase_ai_brief(state: RunState) -> StepResult:
+async def _phase_ai_brief_async(state: RunState) -> StepResult:
     start = time.monotonic()
     if state.dry_run:
         return StepResult("ai_brief_daily", True, 0, "dry-run")
     try:
         from app.api.reports_api import run_ai_brief_daily
-        result = run_async(run_ai_brief_daily())
+        result = await run_ai_brief_daily()
         return StepResult("ai_brief_daily", True, time.monotonic() - start, result=str(result))
     except Exception as e:
         return StepResult("ai_brief_daily", False, time.monotonic() - start, message=str(e))
@@ -346,6 +356,7 @@ def main():
         "narrative": ["narrative_shift", "narrative_daily"],
         "narrative_shift": "narrative_shift",
         "narrative_daily": "narrative_daily",
+        "coverage_summary": "coverage_summary",
         "sahi": "sahi_strategic_brief",
         "ai_brief": "ai_brief_daily",
         "ai_brief_daily": "ai_brief_daily",
@@ -372,22 +383,6 @@ def main():
         print(f"  Skipping: {', '.join(sorted(state.skip))}")
     print()
 
-    # Preflight: MongoDB required (skip in dry-run)
-    if not state.dry_run:
-        print("Preflight: Checking MongoDB...")
-        ok = run_async(check_mongodb())
-        if not ok:
-            print("  MongoDB is required. Exiting.")
-            sys.exit(1)
-        print("  MongoDB OK")
-
-    if not state.skip_deps and not state.dry_run:
-        redis_ok = run_async(check_redis())
-        if redis_ok:
-            print("  Redis OK")
-        else:
-            print("  Redis unavailable (crawler_enqueue may fail, continuing)")
-
     # Set Redis lock so the in-process scheduler skips jobs while backfill runs
     backfill_lock_key = "ingestion:backfill_running"
     backfill_lock_ttl = 7200  # 2h if script dies
@@ -404,52 +399,11 @@ def main():
             redis_client = None
 
     try:
-        # Dependency-ordered phases
-        PHASES: list[tuple[str, Callable[[RunState], StepResult]]] = [
-            ("rss", _phase_rss),
-            ("article_fetcher", _phase_article_fetcher),
-            ("reddit_monitor", _phase_reddit_monitor),
-            ("youtube_monitor", _phase_youtube_monitor),
-            ("crawler_enqueue", _phase_crawler_enqueue),
-            ("forum_ingestion", _phase_forum_ingestion),
-            ("entity_mentions", _phase_entity_mentions),
-            ("entity_sentiment", _phase_entity_sentiment),
-            ("article_topics", _phase_article_topics),
-            ("ai_summary", _phase_ai_summary),
-            ("reddit_trending", _phase_reddit_trending),
-            ("youtube_narrative", _phase_youtube_narrative),
-            ("narrative_shift", _phase_narrative_shift),
-            ("narrative_daily", _phase_narrative_daily),
-            ("sahi_strategic_brief", _phase_sahi),
-            ("ai_brief_daily", _phase_ai_brief),
-        ]
-
-        for phase_name, runner in PHASES:
-            if not state.should_run(phase_name):
-                print(f"  [{phase_name}] SKIP (--skip)")
-                continue
-            try:
-                r = runner(state)
-                state.record(r)
-                status = "OK" if r.ok else "FAIL"
-                extra = f" | {r.message}" if r.message else ""
-                if r.result and r.ok and not state.dry_run:
-                    extra = f" | {r.result}"
-                print(f"  [{phase_name}] {status} ({r.duration_sec:.1f}s){extra}")
-            except SystemExit:
-                raise
-            except Exception as e:
-                r = StepResult(phase_name, False, 0, message=str(e))
-                state.record(r)
-                print(f"  [{phase_name}] FAIL | {e}")
-                if state.strict:
-                    sys.exit(1)
-
+        asyncio.run(_run_all_async(state))
         print()
         ok_count, fail_count = state.summary()
         print(f"Summary: {ok_count} ok, {fail_count} failed")
         print("=" * 60)
-
         if fail_count > 0 and state.strict:
             sys.exit(1)
         sys.exit(0)
@@ -460,6 +414,69 @@ def main():
                 print("  Scheduler resumed (backfill lock cleared).")
             except Exception as e:
                 print(f"  WARNING: Could not clear backfill lock: {e}")
+
+
+async def _run_all_async(state: RunState) -> None:
+    """Run all phases in a single event loop to avoid 'Event loop is closed'."""
+    # Preflight
+    if not state.dry_run:
+        print("Preflight: Checking MongoDB...")
+        ok = await check_mongodb()
+        if not ok:
+            print("  MongoDB is required. Exiting.")
+            raise SystemExit(1)
+        print("  MongoDB OK")
+    if not state.skip_deps and not state.dry_run:
+        redis_ok = await check_redis()
+        if redis_ok:
+            print("  Redis OK")
+        else:
+            print("  Redis unavailable (crawler_enqueue may fail, continuing)")
+
+    # Phases: (name, async_runner or sync_runner). Sync runners return StepResult; async are awaited.
+    PHASES: list[tuple[str, Callable]] = [
+        ("rss", _phase_rss_async),
+        ("article_fetcher", _phase_article_fetcher_async),
+        ("reddit_monitor", _phase_reddit_monitor_async),
+        ("youtube_monitor", _phase_youtube_monitor_async),
+        ("crawler_enqueue", _phase_crawler_enqueue_sync),
+        ("forum_ingestion", _phase_forum_ingestion_async),
+        ("entity_mentions", _phase_entity_mentions_async),
+        ("entity_sentiment", _phase_entity_sentiment_async),
+        ("article_topics", _phase_article_topics_async),
+        ("ai_summary", _phase_ai_summary_async),
+        ("reddit_trending", _phase_reddit_trending_async),
+        ("youtube_narrative", _phase_youtube_narrative_async),
+        ("narrative_shift", _phase_narrative_shift_async),
+        ("narrative_daily", _phase_narrative_daily_async),
+        ("coverage_summary", _phase_coverage_summary_async),
+        ("sahi_strategic_brief", _phase_sahi_async),
+        ("ai_brief_daily", _phase_ai_brief_async),
+    ]
+
+    for phase_name, runner in PHASES:
+        if not state.should_run(phase_name):
+            print(f"  [{phase_name}] SKIP (--skip)")
+            continue
+        try:
+            if asyncio.iscoroutinefunction(runner):
+                r = await runner(state)
+            else:
+                r = runner(state)
+            state.record(r)
+            status = "OK" if r.ok else "FAIL"
+            extra = f" | {r.message}" if r.message else ""
+            if r.result and r.ok and not state.dry_run:
+                extra = f" | {r.result}"
+            print(f"  [{phase_name}] {status} ({r.duration_sec:.1f}s){extra}")
+        except SystemExit:
+            raise
+        except Exception as e:
+            r = StepResult(phase_name, False, 0, message=str(e))
+            state.record(r)
+            print(f"  [{phase_name}] FAIL | {e}")
+            if state.strict:
+                raise SystemExit(1)
 
 
 if __name__ == "__main__":

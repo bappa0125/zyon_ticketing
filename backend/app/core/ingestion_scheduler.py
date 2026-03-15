@@ -278,6 +278,19 @@ def _job_narrative_intelligence_daily():
         logger.exception("scheduler_job_failed", job="narrative_intelligence_daily", error=str(e))
 
 
+def _job_coverage_pr_summary():
+    """Scheduled job: Coverage PR summary (1 LLM per client per day). Once per day."""
+    if _skip_if_backfill("coverage_pr_summary"):
+        return
+    from app.services.coverage_pr_summary_service import run_coverage_pr_summary_batch
+    logger.info("scheduler_job_start", job="coverage_pr_summary")
+    try:
+        result = asyncio.run(run_coverage_pr_summary_batch())
+        logger.info("scheduler_job_complete", job="coverage_pr_summary", result=result)
+    except Exception as e:
+        logger.exception("scheduler_job_failed", job="coverage_pr_summary", error=str(e))
+
+
 def _job_youtube_narrative():
     """Scheduled job: YouTube narrative pipeline (YouTube API + 1 LLM call → daily summary)."""
     if _skip_if_backfill("youtube_narrative_daily"):
@@ -352,6 +365,10 @@ def start_scheduler():
             _scheduler.add_job(_job_narrative_positioning, "cron", hour=9, minute=30, id="narrative_positioning")
         except Exception as e:
             logger.warning("narrative_positioning job not scheduled", error=str(e))
+    try:
+        _scheduler.add_job(_job_coverage_pr_summary, "cron", hour=10, minute=0, id="coverage_pr_summary_daily")
+    except Exception as e:
+        logger.warning("coverage_pr_summary_daily job not scheduled", error=str(e))
 
     # Run RSS once shortly after start so the queue gets new items without waiting 4h
     _scheduler.add_job(

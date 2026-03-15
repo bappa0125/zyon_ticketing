@@ -13,6 +13,12 @@ logger = get_logger(__name__)
 _client: Optional[AsyncIOMotorClient] = None
 
 
+def reset_mongo_client() -> None:
+    """Clear the cached Motor client. Use before asyncio.run() in scripts so the new loop gets a fresh client."""
+    global _client
+    _client = None
+
+
 async def get_mongo_client() -> AsyncIOMotorClient:
     global _client
     if _client is None:

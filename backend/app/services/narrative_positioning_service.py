@@ -148,7 +148,9 @@ async def _llm_positioning(client_name: str, inputs: dict[str, Any]) -> dict[str
         '"positioning" ({headline, pitch_angle, suggested_outlets: []}), '
         '"threats" (array of {narrative, severity, response_angle}, 1-4 items), '
         '"opportunities" (array of {angle, outlet_match}, 2-4 items), '
-        '"evidence_refs" (array of {platform, url, title, snippet}, max 8).'
+        '"evidence_refs" (array of {platform, url, title, snippet}, max 8), '
+        '"brief_summary" (string: 2-4 sentences on what is trending, how client vs competitors are showing up, and 2-3 actionable recommendations for the PR team), '
+        '"content_suggestions" (array of exactly 3 items: one for articles/news, one for YouTube, one for Reddit. Each item: { "place": "articles" | "YouTube" | "Reddit", "title": "suggested title for the piece", "theme": "topic or angle in one line" }).'
     )
     user = (
         f"Client: {client_name}\n\n"
@@ -194,6 +196,8 @@ async def _llm_positioning(client_name: str, inputs: dict[str, Any]) -> dict[str
             "threats": _normalize_threats(parsed.get("threats")),
             "opportunities": _normalize_opportunities(parsed.get("opportunities")),
             "evidence_refs": _normalize_evidence_refs(parsed.get("evidence_refs")),
+            "brief_summary": _normalize_brief_summary(parsed.get("brief_summary")),
+            "content_suggestions": _normalize_content_suggestions(parsed.get("content_suggestions")),
         }
     except json.JSONDecodeError:
         return _empty_output()
@@ -271,6 +275,36 @@ def _normalize_evidence_refs(lst: Any) -> list[dict]:
     return out
 
 
+def _normalize_brief_summary(val: Any) -> str:
+    if not isinstance(val, str) or not val.strip():
+        return ""
+    return val.strip()[:3000]
+
+
+def _normalize_content_suggestions(lst: Any) -> list[dict]:
+    """Exactly 3 items: place (articles | YouTube | Reddit), title, theme."""
+    if not isinstance(lst, list):
+        return []
+    place_label = {"articles": "Articles", "youtube": "YouTube", "reddit": "Reddit"}
+    out = []
+    for x in lst[:3]:
+        if not isinstance(x, dict):
+            continue
+        place = str(x.get("place", "")).strip().lower()
+        if place not in place_label:
+            place = "articles" if not out else ("youtube" if len(out) == 1 else "reddit")
+        out.append({
+            "place": place_label[place],
+            "title": str(x.get("title", ""))[:300],
+            "theme": str(x.get("theme", ""))[:400],
+        })
+    have = {o["place"].lower() for o in out}
+    for p in ["articles", "youtube", "reddit"]:
+        if p not in have and len(out) < 3:
+            out.append({"place": place_label[p], "title": "", "theme": ""})
+    return out[:3]
+
+
 def _empty_output() -> dict[str, Any]:
     return {
         "narratives": [],
@@ -278,6 +312,12 @@ def _empty_output() -> dict[str, Any]:
         "threats": [],
         "opportunities": [],
         "evidence_refs": [],
+        "brief_summary": "",
+        "content_suggestions": [
+            {"place": "articles", "title": "", "theme": ""},
+            {"place": "YouTube", "title": "", "theme": ""},
+            {"place": "Reddit", "title": "", "theme": ""},
+        ],
     }
 
 
@@ -322,6 +362,8 @@ async def run_positioning_for_all_clients() -> dict[str, Any]:
                 "threats": result["threats"],
                 "opportunities": result["opportunities"],
                 "evidence_refs": result["evidence_refs"],
+                "brief_summary": result.get("brief_summary") or "",
+                "content_suggestions": result.get("content_suggestions") or _empty_output()["content_suggestions"],
             }
             await coll.replace_one(
                 {"client": client_name, "date": date_str},

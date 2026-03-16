@@ -102,7 +102,7 @@ export default function ExecutiveReportPage() {
     if (refresh) setRefreshing(true);
     else setLoading(true);
     if (!refresh) setError(null);
-    const REPORT_TIMEOUT_MS = 120_000;
+    const REPORT_TIMEOUT_MS = 300_000; // 5 min — report build can take 1–3 min; avoid client abort before server responds
     const controller = new AbortController();
     const timeoutId = refresh ? window.setTimeout(() => controller.abort(), REPORT_TIMEOUT_MS) : undefined;
     try {
@@ -111,7 +111,7 @@ export default function ExecutiveReportPage() {
       const text = await res.text();
       if (res.status === 502) {
         setError(
-          "502 Bad Gateway: the request took too long and the gateway timed out. Report generation can take 1–2 minutes. If using Docker, run: docker compose up -d --force-recreate nginx. Otherwise set NEXT_PUBLIC_API_URL=http://localhost:8000/api and ensure the backend runs on port 8000 so the request bypasses the dev proxy."
+          "502 Bad Gateway: the request took too long and the gateway timed out. Report generation can take 1–3 minutes. If using Docker, run: docker compose up -d --force-recreate nginx. Otherwise set NEXT_PUBLIC_API_URL=http://localhost:8000/api and ensure the backend runs on port 8000 so the request bypasses the dev proxy."
         );
         setReport(null);
         setGeneratedAt(null);
@@ -146,7 +146,7 @@ export default function ExecutiveReportPage() {
     } catch (e) {
       const isAbort = e instanceof Error && e.name === "AbortError";
       const msg = isAbort
-        ? "Request timed out. Report generation can take 1–2 minutes. Please try again."
+        ? "Request timed out after 5 minutes. Report generation can take 1–3 minutes. Please try again or check that the backend is not overloaded."
         : (e instanceof Error ? e.message : "Network error");
       console.error("Executive report fetch failed", e);
       setError(msg);
@@ -206,7 +206,7 @@ export default function ExecutiveReportPage() {
           <h1 className="text-2xl font-semibold text-[var(--ai-text)]">Executive Report</h1>
           <div className="mt-6 p-8 rounded-xl border border-[var(--ai-border)] bg-[var(--ai-surface)] text-center">
             <p className="text-[var(--ai-text)] font-medium">Generating report…</p>
-            <p className="text-sm text-[var(--ai-muted)] mt-2">This can take 1–2 minutes. Do not close the page.</p>
+            <p className="text-sm text-[var(--ai-muted)] mt-2">This can take 1–3 minutes. Do not close the page.</p>
           </div>
         </div>
       </div>
@@ -241,7 +241,7 @@ export default function ExecutiveReportPage() {
       <div className="app-page">
         <div className="max-w-5xl mx-auto p-6 min-h-[40vh]">
           <h1 className="text-2xl font-semibold text-[var(--ai-text)]">Executive Report</h1>
-          <p className="mt-2 text-[var(--ai-text-secondary)]">No report available. Click below to generate one (this may take 1–2 minutes).</p>
+          <p className="mt-2 text-[var(--ai-text-secondary)]">No report available. Click below to generate one (this may take 1–3 minutes).</p>
           <button
             type="button"
             onClick={() => {

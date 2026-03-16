@@ -12,6 +12,7 @@ COLLECTION_ARTICLE_DOCUMENTS = "article_documents"
 COLLECTION_ENTITY_MENTIONS = "entity_mentions"
 # Larger default so each run processes more; unprocessed-first query drains backlog
 BATCH_SIZE = 150
+# Docs from these domains get type=forum (thread-level when from RSS; listing page when from HTML)
 _FORUM_DOMAINS = {
     "tradingqna.com",
     "traderji.com",

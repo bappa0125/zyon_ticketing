@@ -203,13 +203,13 @@ sources:
   # TRADER COMMUNITIES
   # ------------------------------------------------
 
+  # Forum RSS: one doc per thread (RSS item = thread URL → article_fetcher fetches full thread)
   - domain: tradingqna.com
     name: TradingQnA
     category: forum
     region: india
-    crawl_method: html
-    entry_url: https://tradingqna.com/latest
-    rss_feed: null
+    crawl_method: rss
+    rss_feed: https://tradingqna.com/latest.rss
     crawl_frequency: 180
     priority: 2
     weight: 8
@@ -229,9 +229,8 @@ sources:
     name: ValuePickr
     category: forum
     region: india
-    crawl_method: html
-    entry_url: https://forum.valuepickr.com/
-    rss_feed: null
+    crawl_method: rss
+    rss_feed: https://forum.valuepickr.com/latest.rss
     crawl_frequency: 180
     priority: 2
     weight: 7

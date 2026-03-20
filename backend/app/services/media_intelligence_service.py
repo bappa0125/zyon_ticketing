@@ -1,16 +1,40 @@
 """Media Intelligence dashboard — coverage, feed, timeline, top publications, topics, by_domain.
 Reads from article_documents + entity_mentions (single pipeline); no media_articles."""
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, Sequence
 
 from app.core.client_config_loader import get_entity_names, get_competitor_names, load_clients
+from app.core.logging import get_logger
 from app.services.mongodb import get_mongo_client
+
+logger = get_logger(__name__)
 
 ENTITY_MENTIONS_COLLECTION = "entity_mentions"
 ARTICLE_DOCUMENTS_COLLECTION = "article_documents"
 FEED_LIMIT = 100
 TOP_PUBS_LIMIT = 15
 TOPICS_LIMIT = 12
+
+
+def _strip_leading_www_variants(host: str) -> str:
+    """
+    Normalize hostname: www., www2., www360., etc.
+    Many Indian publishers use www2.example.com which would not match config example.com otherwise.
+    """
+    h = (host or "").strip().lower()
+    if not h:
+        return ""
+    changed = True
+    while changed:
+        changed = False
+        if h.startswith("www."):
+            h = h[4:]
+            changed = True
+        elif re.match(r"^www\d+\.", h):
+            h = re.sub(r"^www\d+\.", "", h, count=1)
+            changed = True
+    return h[:200]
 
 
 def _normalize_domain(source: str) -> str:
@@ -27,6 +51,7 @@ def _normalize_domain(source: str) -> str:
         s = s.split("/", 1)[0]
     if s.startswith("www."):
         s = s[4:]
+    s = _strip_leading_www_variants(s)
     return s[:200]
 
 
@@ -39,9 +64,40 @@ def _domain_from_url(url: str) -> str:
     netloc = (parsed.netloc or "").split(":")[0].lower()
     if not netloc or netloc == "news.google.com":
         return ""
-    if netloc.startswith("www."):
-        netloc = netloc[4:]
+    netloc = _strip_leading_www_variants(netloc)
     return netloc[:200] if "." in netloc and " " not in netloc else ""
+
+
+def _google_or_empty_url_host(url: str) -> bool:
+    """True when stored URL is still an aggregator/redirect host — prefer source_domain from the row."""
+    if not url or not isinstance(url, str):
+        return True
+    from urllib.parse import urlparse
+
+    netloc = (urlparse(url.strip()).netloc or "").split(":")[0].lower()
+    if not netloc:
+        return True
+    netloc = _strip_leading_www_variants(netloc)
+    if netloc == "news.google.com":
+        return True
+    if netloc in ("google.com", "google.co.in", "google.co.uk"):
+        return True
+    if netloc.endswith(".cdn.ampproject.org") or netloc.endswith(".ampproject.org"):
+        return True
+    return False
+
+
+def _effective_row_source_domain(r: dict[str, Any]) -> str:
+    """
+    Domain for Coverage-by-source mapping. Prefer real publisher host from URL; when URL is still
+    Google News / google.com redirect, use normalized source field (entity_mentions.source_domain / article source_domain).
+    """
+    url_val = (r.get("url") or "").strip()
+    src_norm = _normalize_domain(r.get("source") or "")
+    url_dom = _domain_from_url(url_val) if url_val else ""
+    if _google_or_empty_url_host(url_val) or not url_dom:
+        return src_norm or url_dom
+    return url_dom or src_norm
 
 
 def _map_to_config_domain(domain: str, config_domains: set[str]) -> str | None:
@@ -56,8 +112,7 @@ def _map_to_config_domain(domain: str, config_domains: set[str]) -> str | None:
     d = domain.strip().lower()
     if not d or " " in d:
         return None
-    if d.startswith("www."):
-        d = d[4:]
+    d = _strip_leading_www_variants(d)
     if d in config_domains:
         return d
     for cfg in config_domains:
@@ -82,8 +137,11 @@ def _to_dt(val: Any) -> datetime | None:
     if isinstance(val, datetime):
         return val.replace(tzinfo=timezone.utc) if val.tzinfo is None else val
     if isinstance(val, str):
+        s = val.strip()
+        if not s:
+            return None
         try:
-            return datetime.fromisoformat(val.replace("Z", "+00:00"))
+            return datetime.fromisoformat(s.replace("Z", "+00:00"))
         except (ValueError, TypeError):
             return None
     return None
@@ -97,6 +155,38 @@ def _date_str(dt: datetime | None) -> str | None:
     if isinstance(dt, str) and len(dt) >= 10:
         return dt[:10]
     return None
+
+
+def _entity_lower_to_canonical(entities: Sequence[str]) -> dict[str, str]:
+    """Map stripped lowercase entity -> canonical name from clients.yaml (for coverage keys)."""
+    out: dict[str, str] = {}
+    for e in entities:
+        if not e or not isinstance(e, str):
+            continue
+        c = e.strip()
+        if not c:
+            continue
+        out[c.lower()] = c
+    return out
+
+
+def _mongo_case_insensitive_entity_filter(field: str, entities: Sequence[str]) -> dict[str, Any]:
+    """
+    Build a Mongo filter fragment: match field (string or array of strings) to any entity, case-insensitive.
+    Uses anchored regex per name so 'grow' does not match 'Groww' when names differ (still exact full-string match).
+    """
+    ors: list[dict[str, Any]] = []
+    for e in entities:
+        if not e or not isinstance(e, str):
+            continue
+        s = e.strip()
+        if not s:
+            continue
+        # BSON Regex via re.compile — reliable for array fields (e.g. entities[]) across Mongo versions
+        ors.append({field: re.compile(f"^{re.escape(s)}$", re.IGNORECASE)})
+    if not ors:
+        return {"_id": {"$exists": False}}
+    return {"$or": ors} if len(ors) > 1 else ors[0]
 
 
 async def _load_unified_mentions(
@@ -114,25 +204,29 @@ async def _load_unified_mentions(
     - Optional limit on number of unified items returned.
     """
     raw: list[dict[str, Any]] = []
+    elower = _entity_lower_to_canonical(entities)
 
-    # 1. entity_mentions: entity (string) in entities
+    # 1. entity_mentions: entity matches any tracked name (case-insensitive); normalize to canonical for dashboard keys
     try:
-        cursor = (
-            em_coll.find(
+        em_q = {
+            "$and": [
+                _mongo_case_insensitive_entity_filter("entity", entities),
                 {
-                    "entity": {"$in": list(entities)},
                     "$or": [
                         {"published_at": {"$gte": cutoff}},
                         {"timestamp": {"$gte": cutoff}},
                     ],
-                }
-            )
-            .sort("published_at", -1)
-            .sort("timestamp", -1)
-        )
+                },
+            ]
+        }
+        cursor = em_coll.find(em_q).sort([("timestamp", -1), ("published_at", -1)])
         if limit is not None:
             cursor = cursor.limit(limit * 2)
         async for doc in cursor:
+            raw_entity = (doc.get("entity") or "").strip()
+            canonical = elower.get(raw_entity.lower())
+            if not canonical:
+                continue
             pub = doc.get("published_at") or doc.get("timestamp")
             raw.append(
                 {
@@ -146,30 +240,29 @@ async def _load_unified_mentions(
                     "url": (doc.get("url") or "").strip(),
                     "url_original": (doc.get("url_original") or "").strip(),
                     "url_note": (doc.get("url_note") or "").strip(),
-                    "entity": (doc.get("entity") or "").strip(),
+                    "entity": canonical,
                     "id": str(doc.get("_id", "")),
                     "content_quality": doc.get("content_quality") or "full_text",
                     "author": (doc.get("author") or "").strip()[:300] if doc.get("author") else None,
                 }
             )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("media_intelligence_entity_mentions_query_failed", error=str(e))
 
-    # 2. article_documents: entities (array) contains any of our entities
+    # 2. article_documents: entities[] contains a tracked name (case-insensitive)
     try:
-        cursor = (
-            art_coll.find(
+        art_q = {
+            "$and": [
+                _mongo_case_insensitive_entity_filter("entities", entities),
                 {
-                    "entities": {"$in": list(entities)},
                     "$or": [
                         {"published_at": {"$gte": cutoff}},
                         {"fetched_at": {"$gte": cutoff}},
                     ],
-                }
-            )
-            .sort("published_at", -1)
-            .sort("fetched_at", -1)
-        )
+                },
+            ]
+        }
+        cursor = art_coll.find(art_q).sort([("fetched_at", -1), ("published_at", -1)])
         if limit is not None:
             cursor = cursor.limit(limit * 2)
         async for doc in cursor:
@@ -178,7 +271,10 @@ async def _load_unified_mentions(
             article_text = (doc.get("article_text") or "").strip()
             content_quality = "snippet" if not article_text else "full_text"
             for entity_val in ents:
-                if not isinstance(entity_val, str) or entity_val not in entities:
+                if not isinstance(entity_val, str):
+                    continue
+                canonical = elower.get(entity_val.strip().lower())
+                if not canonical:
                     continue
                 raw.append(
                     {
@@ -192,14 +288,14 @@ async def _load_unified_mentions(
                         "url": (doc.get("url") or doc.get("url_resolved") or "").strip(),
                         "url_original": (doc.get("url_original") or "").strip(),
                         "url_note": (doc.get("url_note") or "").strip(),
-                        "entity": (entity_val or "").strip(),
-                        "id": f"{doc.get('_id', '')}_{entity_val or ''}",
+                        "entity": canonical,
+                        "id": f"{doc.get('_id', '')}_{canonical}",
                         "content_quality": content_quality,
                         "author": (doc.get("author") or "").strip()[:300] if doc.get("author") else None,
                     }
                 )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("media_intelligence_article_documents_query_failed", error=str(e))
 
     # Dedupe by (url, entity). Prefer items WITH author (article_documents often have it; entity_mentions may not).
     def _sort_key(x: dict) -> tuple:
@@ -223,10 +319,7 @@ async def _load_unified_mentions(
         if key in seen:
             continue
         seen.add(key)
-        # Prefer domain from URL so we match media_sources.yaml; fallback to normalizing source
-        url_val = (r.get("url") or "").strip()
-        domain_from_url = _domain_from_url(url_val) if url_val else ""
-        r["source_domain"] = domain_from_url or _normalize_domain(r.get("source") or "")
+        r["source_domain"] = _effective_row_source_domain(r)
         unified.append(r)
         if limit is not None and len(unified) >= limit:
             break
@@ -433,6 +526,7 @@ async def get_dashboard(
             "by_domain": [],
             "client": client,
             "competitors": [],
+            "meta": {"unified_mentions_count": 0, "article_documents_in_window": 0, "media_sources_count": 0},
         }
 
     client_name = (client_obj.get("name") or "").strip()
@@ -485,6 +579,32 @@ async def get_dashboard(
         if e_canonical and e_canonical in domain_entity_count[d]:
             domain_entity_count[d][e_canonical] += 1
     by_domain: list[dict[str, Any]] = []
+    # How many article_documents landed in this time window per config domain (any topic).
+    # Helps tell "ingestion gap" (0 indexed) vs "no entity hits" (indexed > 0 but total 0).
+    articles_indexed_by_domain: dict[str, int] = {d: 0 for d in domain_to_name}
+    articles_indexed_scan_error: str | None = None
+    try:
+        acursor = art_coll.find(
+            {
+                "$or": [
+                    {"published_at": {"$gte": cutoff}},
+                    {"fetched_at": {"$gte": cutoff}},
+                ],
+            },
+            projection={"url": 1, "url_resolved": 1, "source_domain": 1},
+        )
+        async for doc in acursor:
+            u = (doc.get("url") or doc.get("url_resolved") or "").strip()
+            raw = _domain_from_url(u) if u else ""
+            if not raw:
+                raw = _normalize_domain(doc.get("source_domain") or "")
+            mapped = _map_to_config_domain(raw, config_domain_set)
+            if mapped and mapped in articles_indexed_by_domain:
+                articles_indexed_by_domain[mapped] += 1
+    except Exception as e:
+        articles_indexed_scan_error = str(e)
+        logger.warning("media_intelligence_articles_indexed_scan_failed", error=str(e))
+
     for d in domain_to_name:
         counts = domain_entity_count.get(d, {e: 0 for e in entities})
         total = sum(counts.values())
@@ -493,8 +613,10 @@ async def get_dashboard(
             "name": domain_to_name[d],
             "total": total,
             "entities": counts,
+            "articles_indexed": articles_indexed_by_domain.get(d, 0),
         })
     by_domain.sort(key=lambda x: -x["total"])
+    article_documents_in_window = sum(articles_indexed_by_domain.values())
 
     # Optional filter by domain for feed/coverage/timeline/top_pubs/topics
     if domain_filter:
@@ -629,6 +751,12 @@ async def get_dashboard(
         "topics": topics,
         "by_domain": by_domain,
         "pr_summary": pr_summary,
+        "meta": {
+            "unified_mentions_count": len(unified),
+            "article_documents_in_window": article_documents_in_window,
+            "media_sources_count": len(domain_to_name),
+            "articles_indexed_scan_error": articles_indexed_scan_error,
+        },
     }
 
 

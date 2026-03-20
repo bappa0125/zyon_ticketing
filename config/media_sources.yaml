@@ -8,8 +8,10 @@ sources:
   # FINANCIAL NEWS (HIGH PRIORITY)
   # ------------------------------------------------
 
+  # Moneycontrol: multiple official RSS endpoints (same domain → one Coverage row; dedupe by article URL).
+  # Verified 200 + application/xml (avoid indian_markets.xml / markets.xml — often 503).
   - domain: moneycontrol.com
-    name: Moneycontrol
+    name: Moneycontrol — Business
     category: financial_news
     region: india
     crawl_method: rss
@@ -17,6 +19,36 @@ sources:
     crawl_frequency: 120
     priority: 1
     weight: 10
+
+  - domain: moneycontrol.com
+    name: Moneycontrol — Market reports
+    category: financial_news
+    region: india
+    crawl_method: rss
+    rss_feed: https://www.moneycontrol.com/rss/marketreports.xml
+    crawl_frequency: 120
+    priority: 1
+    weight: 10
+
+  - domain: moneycontrol.com
+    name: Moneycontrol — Latest news
+    category: financial_news
+    region: india
+    crawl_method: rss
+    rss_feed: https://www.moneycontrol.com/rss/latestnews.xml
+    crawl_frequency: 120
+    priority: 1
+    weight: 9
+
+  - domain: moneycontrol.com
+    name: Moneycontrol — Most popular
+    category: financial_news
+    region: india
+    crawl_method: rss
+    rss_feed: https://www.moneycontrol.com/rss/mostpopular.xml
+    crawl_frequency: 180
+    priority: 2
+    weight: 7
 
   - domain: economictimes.indiatimes.com
     name: Economic Times Markets
@@ -52,8 +84,9 @@ sources:
     name: Financial Express
     category: financial_news
     region: india
-    crawl_method: rss
-    rss_feed: https://www.financialexpress.com/feed/
+    crawl_method: html
+    entry_url: https://www.financialexpress.com/market/
+    rss_feed: null
     crawl_frequency: 120
     priority: 1
     weight: 8
@@ -107,8 +140,9 @@ sources:
     name: Entrackr
     category: startup_media
     region: india
-    crawl_method: rss
-    rss_feed: https://entrackr.com/feed/
+    crawl_method: html
+    entry_url: https://entrackr.com/all-article
+    rss_feed: null
     crawl_frequency: 120
     priority: 2
     weight: 7
@@ -162,8 +196,9 @@ sources:
     name: Upstox Blog
     category: broker_blog
     region: india
-    crawl_method: rss
-    rss_feed: https://upstox.com/blog/feed/
+    crawl_method: html
+    entry_url: https://upstox.com/market-talk/
+    rss_feed: null
     crawl_frequency: 180
     priority: 2
     weight: 7
@@ -172,8 +207,9 @@ sources:
     name: Groww Blog
     category: broker_blog
     region: india
-    crawl_method: rss
-    rss_feed: https://groww.in/blog/feed
+    crawl_method: html
+    entry_url: https://groww.in/blog/
+    rss_feed: null
     crawl_frequency: 180
     priority: 2
     weight: 7
@@ -182,8 +218,9 @@ sources:
     name: Angel One Blog
     category: broker_blog
     region: india
-    crawl_method: rss
-    rss_feed: https://www.angelone.in/blog/feed
+    crawl_method: html
+    entry_url: https://www.angelone.in/blog
+    rss_feed: null
     crawl_frequency: 180
     priority: 2
     weight: 7
@@ -240,7 +277,7 @@ sources:
   # MARKET ANALYSIS BLOGS
   # ------------------------------------------------
 
-  - domain: capitalsmind.in
+  - domain: capitalmind.in
     name: Capitalmind
     category: analysis_blog
     region: india
@@ -274,8 +311,9 @@ sources:
     name: Subramoney
     category: analysis_blog
     region: india
-    crawl_method: rss
-    rss_feed: https://www.subramoney.com/feed/
+    crawl_method: html
+    entry_url: https://www.subramoney.com/
+    rss_feed: null
     crawl_frequency: 180
     priority: 3
     weight: 6
@@ -297,8 +335,9 @@ sources:
     name: Business Today Markets
     category: financial_news
     region: india
-    crawl_method: rss
-    rss_feed: https://www.businesstoday.in/rss/markets
+    crawl_method: html
+    entry_url: https://www.businesstoday.in/markets
+    rss_feed: null
     crawl_frequency: 120
     priority: 1
     weight: 8
@@ -307,8 +346,9 @@ sources:
     name: Outlook Business
     category: financial_news
     region: india
-    crawl_method: rss
-    rss_feed: https://www.outlookbusiness.com/rss
+    crawl_method: html
+    entry_url: https://www.outlookbusiness.com/
+    rss_feed: null
     crawl_frequency: 120
     priority: 2
     weight: 7
@@ -318,7 +358,7 @@ sources:
     category: financial_news
     region: india
     crawl_method: rss
-    rss_feed: https://www.fortuneindia.com/rss
+    rss_feed: https://www.fortuneindia.com/feed
     crawl_frequency: 120
     priority: 2
     weight: 7
@@ -332,8 +372,9 @@ sources:
     name: Reuters Business
     category: global_finance
     region: global
-    crawl_method: rss
-    rss_feed: https://www.reutersagency.com/feed/?best-topics=business-finance&post_type=best
+    crawl_method: html
+    entry_url: https://www.reuters.com/business/
+    rss_feed: null
     crawl_frequency: 120
     priority: 2
     weight: 8
@@ -367,8 +408,9 @@ sources:
     name: Fintech Futures
     category: fintech_media
     region: global
-    crawl_method: rss
-    rss_feed: https://www.fintechfutures.com/feed/
+    crawl_method: html
+    entry_url: https://www.fintechfutures.com/
+    rss_feed: null
     crawl_frequency: 120
     priority: 2
     weight: 6
@@ -377,8 +419,9 @@ sources:
     name: The Paypers
     category: fintech_media
     region: global
-    crawl_method: rss
-    rss_feed: https://thepaypers.com/rss
+    crawl_method: html
+    entry_url: https://thepaypers.com/
+    rss_feed: null
     crawl_frequency: 120
     priority: 2
     weight: 6

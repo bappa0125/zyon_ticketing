@@ -1,38 +1,21 @@
 """
 Context-aware entity validation — applied AFTER entity detection.
 Discard mentions matching ignore_patterns; require context keyword for ambiguous entities.
-Configuration: config/clients.yaml (context_keywords, ignore_patterns per client).
+Configuration: same active clients file as entity detection (clients.yaml or executive file when enabled).
 Does not modify the entity detection pipeline.
 """
 import re
-from pathlib import Path
 from typing import Any, Union
 
-import yaml
-
+from app.core.client_config_loader import load_clients_sync
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-_clients_cache: list[dict[str, Any]] | None = None
-
 
 def _load_clients() -> list[dict[str, Any]]:
-    """Load clients from config/clients.yaml (sync)."""
-    global _clients_cache
-    if _clients_cache is not None:
-        return _clients_cache
-    project_root = Path(__file__).resolve().parent.parent.parent
-    config_dir = project_root / "config"
-    if not config_dir.exists():
-        config_dir = Path("/app/config")
-    path = config_dir / "clients.yaml"
-    if not path.exists():
-        return []
-    with open(path) as f:
-        data = yaml.safe_load(f) or {}
-    _clients_cache = data.get("clients", [])
-    return _clients_cache
+    """Load clients (sync, shared with entity_detection_service and Redis-backed API)."""
+    return load_clients_sync()
 
 
 def _competitor_name(comp: Union[dict, str, None]) -> str:
@@ -57,16 +40,21 @@ def _get_entity_config(entity: str) -> dict[str, Any] | None:
             comp_name = _competitor_name(comp)
             if comp_name.lower() == entity_lower:
                 if isinstance(comp, dict):
+                    comp_ck = comp.get("context_keywords")
+                    if isinstance(comp_ck, list) and len(comp_ck) > 0:
+                        ck = comp_ck
+                    else:
+                        ck = c.get("context_keywords") or []
                     return {
                         "ignore_patterns": comp.get("ignore_patterns") or [],
-                        "context_keywords": c.get("context_keywords") or [],
+                        "context_keywords": ck if isinstance(ck, list) else [],
                     }
                 return c
     return None
 
 
 def get_context_keywords(entity: str) -> list[str]:
-    """Return context_keywords for entity from clients.yaml (shared for client and competitors)."""
+    """Return context_keywords for entity (competitor may override; else inherits client list)."""
     entity = (entity or "").strip()
     if not entity:
         return []
@@ -78,7 +66,14 @@ def get_context_keywords(entity: str) -> list[str]:
             return [k.strip() for k in kw if k and isinstance(k, str)] if isinstance(kw, list) else []
         for comp in c.get("competitors") or []:
             if _competitor_name(comp).lower() == entity_lower:
-                kw = c.get("context_keywords") or []
+                if isinstance(comp, dict):
+                    comp_kw = comp.get("context_keywords")
+                    if isinstance(comp_kw, list) and len(comp_kw) > 0:
+                        kw = comp_kw
+                    else:
+                        kw = c.get("context_keywords") or []
+                else:
+                    kw = c.get("context_keywords") or []
                 return [k.strip() for k in kw if k and isinstance(k, str)] if isinstance(kw, list) else []
     return []
 
@@ -96,7 +91,7 @@ def get_disambiguated_search_query(entity: str) -> str:
 
 def resolve_to_canonical_entity(query: str) -> str | None:
     """
-    Map a search query to the canonical entity name from clients.yaml.
+    Map a search query to the canonical entity name from the active clients config.
     Handles phrases like 'latest news on Sahi' -> 'Sahi', 'sahi trading app' -> 'Sahi'.
     Returns None if no client/alias/competitor matches.
     """
@@ -135,17 +130,83 @@ def resolve_to_canonical_entity(query: str) -> str | None:
     return None
 
 
-def validate_mention_context(entity: str, article_text: str) -> bool:
+# Brutal option: these sources are often written without explicit “context keywords”
+# (e.g. “trading”, “broker”), but we still want mentions. We skip the context-keyword
+# requirement when the source_domain matches one of these.
+_FINANCIAL_NEWS_DOMAINS = frozenset({
+    "business-standard.com",
+    "moneycontrol.com",
+    "cnbctv18.com",
+    "ndtvprofit.com",
+    "economictimes.indiatimes.com",
+    "livemint.com",
+    "financialexpress.com",
+    "thehindubusinessline.com",
+    "businesstoday.in",
+    "outlookbusiness.com",
+    "fortuneindia.com",
+    "reuters.com",
+    "bloomberg.com",
+    "marketwatch.com",
+    "fintechfutures.com",
+    "thepaypers.com",
+    "pymnts.com",
+    "entrackr.com",
+    "upstox.com",
+    "groww.in",
+    "angelone.in",
+    "dhan.co",
+    "finshots.in",
+    "freefincal.com",
+    "valuepickr.com",
+    "safalniveshak.com",
+    "getmoneyrich.com",
+    "subramoney.com",
+})
+
+
+def _normalize_domain(domain: str) -> str:
+    if not domain or not isinstance(domain, str):
+        return ""
+    d = domain.strip().lower()
+    if d.startswith("www."):
+        d = d[4:]
+    return d[:200]
+
+
+def validate_mention_context(entity: str, article_text: str, source_domain: str | None = None) -> bool:
     """
-    Validate entity mention after detection: discard if ignore_patterns match;
-    for ambiguous entities (those with context_keywords), require at least one context keyword in text.
-    Returns True if mention is valid, False if it should be discarded.
+    Validate entity mention after detection:
+    - discard if ignore_patterns match
+    - require context keyword for entities that have context_keywords
+
+    Brutal ingest: if source_domain is a known financial-news domain, skip the
+    context-keyword requirement (still respects ignore_patterns).
     """
     if not entity or not isinstance(article_text, str):
         return False
     text = article_text.strip().lower()
     if not text:
         return True
+
+    # Finance/news sources: only ignore_patterns are applied.
+    if source_domain:
+        sd = _normalize_domain(source_domain)
+        if sd and (sd in _FINANCIAL_NEWS_DOMAINS or any(sd.endswith("." + x) for x in _FINANCIAL_NEWS_DOMAINS)):
+            cfg = _get_entity_config(entity)
+            # If entity has no config, accept.
+            if not cfg:
+                return True
+            ignore_patterns = cfg.get("ignore_patterns") or []
+            if isinstance(ignore_patterns, list):
+                for pat in ignore_patterns:
+                    if pat and isinstance(pat, str):
+                        p = pat.strip().lower()
+                        if p and re.search(r"\b" + re.escape(p) + r"\b", text):
+                            logger.debug("mention_context_rejected_ignore", entity=entity, pattern=p[:50])
+                            return False
+            return True
+
     cfg = _get_entity_config(entity)
     if not cfg:
         return True

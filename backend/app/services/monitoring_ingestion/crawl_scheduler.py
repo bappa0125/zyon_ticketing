@@ -1,5 +1,6 @@
 """Crawl Scheduler — determine which sources are ready to be crawled.
 STEP 2: Scheduling logic only. No crawling, no network, no workers."""
+import hashlib
 import time
 from typing import Any
 
@@ -7,19 +8,31 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-# In-memory state: domain -> last_crawled_at (seconds since epoch)
+# In-memory state: scheduler_key -> last_crawled_at (seconds since epoch)
 _last_crawled: dict[str, float] = {}
 
 # Default crawl_frequency (minutes) if missing on source
 _DEFAULT_CRAWL_FREQUENCY_MINUTES = 60
 
 
+def scheduler_source_key(source: dict[str, Any]) -> str:
+    """
+    Stable scheduler key. Same domain with different rss_feed (e.g. multiple Moneycontrol feeds)
+    gets separate slots so each feed respects its own crawl interval.
+    """
+    domain = (source.get("domain") or "").strip().lower() if isinstance(source.get("domain"), str) else ""
+    if not domain:
+        return ""
+    rss = (source.get("rss_feed") or "").strip() if isinstance(source.get("rss_feed"), str) else ""
+    if rss:
+        h = hashlib.sha256(rss.encode("utf-8")).hexdigest()[:16]
+        return f"{domain}::{h}"
+    return domain
+
+
 def _source_key(source: dict[str, Any]) -> str:
-    """Stable key for a source (domain)."""
-    domain = source.get("domain")
-    if domain and isinstance(domain, str):
-        return domain.strip().lower()
-    return ""
+    """Backward-compatible alias — same as scheduler_source_key."""
+    return scheduler_source_key(source)
 
 
 def _crawl_frequency_minutes(source: dict[str, Any]) -> float:
@@ -107,21 +120,20 @@ def get_ready_sources_by_priority(
     return dict(sorted(by_priority.items()))
 
 
-def mark_crawled(domain: str) -> None:
+def mark_crawled(source_key: str) -> None:
     """
-    Record that a source (by domain) was crawled at the current time.
-    Call this when a crawler completes a source (future step).
+    Record that a source was crawled at the current time.
+    Pass scheduler_source_key(source_dict) or legacy domain-only string.
     """
-    if domain and isinstance(domain, str):
-        key = domain.strip().lower()
+    if source_key and isinstance(source_key, str):
+        key = source_key.strip()
         if key:
             _last_crawled[key] = time.time()
-            logger.debug("crawl_scheduler_marked", domain=key)
+            logger.debug("crawl_scheduler_marked", key=key[:120])
 
 
-def get_last_crawled(domain: str) -> float | None:
-    """Return last_crawled_at (seconds since epoch) for a domain, or None if never crawled."""
-    if not domain or not isinstance(domain, str):
+def get_last_crawled(source_key: str) -> float | None:
+    """Return last_crawled_at for this scheduler key, or None if never crawled."""
+    if not source_key or not isinstance(source_key, str):
         return None
-    key = domain.strip().lower()
-    return _last_crawled.get(key)
+    return _last_crawled.get(source_key.strip())

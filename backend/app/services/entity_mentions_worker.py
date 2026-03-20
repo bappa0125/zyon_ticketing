@@ -63,7 +63,7 @@ async def run_entity_mentions_pipeline(batch_size: int = BATCH_SIZE, newest_firs
         except Exception as e:
             logger.warning("entity_mentions_mark_processed_failed", _id=str(doc_id), error=str(e))
 
-    DETECTION_WINDOW = 8000
+    DETECTION_WINDOW = 15000
     CONTENT_QUALITY_FULL_TEXT = "full_text"
     CONTENT_QUALITY_SNIPPET = "snippet"
 
@@ -75,7 +75,7 @@ async def run_entity_mentions_pipeline(batch_size: int = BATCH_SIZE, newest_firs
             title = (doc.get("title") or "")[:500]
             source_domain = (doc.get("source_domain") or "")[:200]
             published_at = doc.get("published_at") or doc.get("fetched_at")
-            article_text = (doc.get("article_text") or "")[:10000]
+            article_text = (doc.get("article_text") or "")[:DETECTION_WINDOW]
             rss_summary = (doc.get("summary") or "").strip()[:2000]
 
             if not url:
@@ -116,7 +116,7 @@ async def run_entity_mentions_pipeline(batch_size: int = BATCH_SIZE, newest_firs
             mention_type = "forum" if sd in _FORUM_DOMAINS else "article"
 
             for entity in entities_found:
-                if not validate_mention_context(entity, validation_text):
+                if not validate_mention_context(entity, validation_text, source_domain):
                     logger.info(
                         "entity_mentions_detection",
                         reason="context_rejected",
@@ -129,11 +129,15 @@ async def run_entity_mentions_pipeline(batch_size: int = BATCH_SIZE, newest_firs
                 if existing:
                     continue
 
+                now_utc = datetime.now(timezone.utc)
                 mention_doc = {
                     "entity": entity,
                     "title": title,
                     "source_domain": source_domain,
                     "published_at": published_at,
+                    # When published_at is outside the dashboard window, timestamp keeps the row
+                    # visible for "last 7d / 30d" (detection/index time vs article date).
+                    "timestamp": now_utc,
                     "summary": summary,
                     "sentiment": None,
                     "url": url[:2000],

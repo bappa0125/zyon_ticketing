@@ -15,6 +15,16 @@ MAX_FEEDS_PER_RUN = 10
 REQUEST_TIMEOUT = 15
 DEFAULT_FRESHNESS_HOURS = 168  # 7 days: avoid skipping recent articles when runs are 4h apart
 
+# Browser-like headers — some publishers (e.g. Moneycontrol/Akamai) return consent/HTML to generic bots.
+RSS_REQUEST_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/rss+xml, application/xml, application/atom+xml, text/xml;q=0.9, */*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
 
 def _parse_published(entry: Any) -> datetime | None:
     """Parse published/updated date from feed entry to datetime."""
@@ -41,7 +51,7 @@ def _parse_published(entry: Any) -> datetime | None:
 def _extract_entries(feed_url: str, source_domain: str, rss_feed: str) -> list[dict[str, Any]]:
     """Fetch RSS feed and extract article metadata. No article page fetch."""
     try:
-        parsed = feedparser.parse(feed_url, request_headers={"User-Agent": "ZyonRSSIngestion/1.0"})
+        parsed = feedparser.parse(feed_url, request_headers=dict(RSS_REQUEST_HEADERS))
     except Exception as e:
         logger.warning("rss_ingestion_fetch_failed", feed=feed_url, error=str(e))
         return []
@@ -96,6 +106,7 @@ async def run_rss_ingestion(max_feeds: int = MAX_FEEDS_PER_RUN, force: bool = Fa
         get_ready_sources,
         get_ordered_ready_sources,
         mark_crawled,
+        scheduler_source_key,
     )
     from app.services.monitoring_ingestion.media_source_registry import get_rss_sources
 
@@ -150,7 +161,7 @@ async def run_rss_ingestion(max_feeds: int = MAX_FEEDS_PER_RUN, force: bool = Fa
             continue
         entries = _extract_entries(rss_feed, domain, rss_feed)
         feeds_processed += 1
-        mark_crawled(domain)
+        mark_crawled(scheduler_source_key(source))
         feed_fresh = 0
         feed_stale = 0
         now_utc = datetime.now(timezone.utc)

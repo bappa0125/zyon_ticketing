@@ -1,23 +1,16 @@
 """Media Source Registry — load and expose config/media_sources.yaml.
 No crawling, no network, no database. Configuration only."""
-from pathlib import Path
-from typing import Any
+from typing import Any, Optional, Tuple
 
 import yaml
 
+from app.core.client_config_loader import _get_config_dir
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-_SOURCES_CACHE: list[dict[str, Any]] | None = None
-
-
-def _get_config_dir() -> Path:
-    project_root = Path(__file__).resolve().parent.parent.parent.parent
-    config_dir = project_root / "config"
-    if not config_dir.exists():
-        config_dir = Path("/app/config")
-    return config_dir
+# (path_str, mtime, sources) — reload when file changes (same pattern as load_clients_sync)
+_SOURCES_CACHE: Tuple[Optional[str], Optional[float], Optional[list[dict[str, Any]]]] = (None, None, None)
 
 
 def _is_rss_source(source: dict[str, Any]) -> bool:
@@ -66,37 +59,50 @@ def _validate_and_normalize_source(entry: Any, index: int) -> dict[str, Any] | N
     return source
 
 
+def clear_media_sources_cache() -> None:
+    """Clear in-process cache (tests, or tooling)."""
+    global _SOURCES_CACHE
+    _SOURCES_CACHE = (None, None, None)
+
+
 def load_media_sources() -> list[dict[str, Any]]:
     """
     Read config/media_sources.yaml, parse the list under "sources",
     validate minimal structure (domain, crawl_frequency), and return the list.
     Missing required fields log a warning but do not crash.
     Optional fields (priority, weight, category, name, region, crawl_method, entry_url, rss_feed)
-    are preserved as-is. Result is cached.
+    are preserved as-is. Reloads when media_sources.yaml mtime changes.
     """
     global _SOURCES_CACHE
-    if _SOURCES_CACHE is not None:
-        return _SOURCES_CACHE
-
     path = _get_config_dir() / "media_sources.yaml"
+    path_key = str(path.resolve())
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        mtime = -1.0
+
+    cached_path, cached_mtime, cached_list = _SOURCES_CACHE
+    if cached_list is not None and cached_path == path_key and cached_mtime == mtime:
+        return cached_list
+
     if not path.exists():
         logger.warning("media_source_registry_file_not_found", path=str(path))
-        _SOURCES_CACHE = []
-        return _SOURCES_CACHE
+        _SOURCES_CACHE = (path_key, mtime, [])
+        return []
 
     try:
         with open(path) as f:
             data = yaml.safe_load(f) or {}
     except Exception as e:
         logger.error("media_source_registry_load_failed", path=str(path), error=str(e))
-        _SOURCES_CACHE = []
-        return _SOURCES_CACHE
+        _SOURCES_CACHE = (path_key, mtime, [])
+        return []
 
     raw = data.get("sources")
     if not isinstance(raw, list):
         logger.warning("media_source_registry_no_sources_list", path=str(path))
-        _SOURCES_CACHE = []
-        return _SOURCES_CACHE
+        _SOURCES_CACHE = (path_key, mtime, [])
+        return []
 
     sources: list[dict[str, Any]] = []
     for i, entry in enumerate(raw):
@@ -109,12 +115,13 @@ def load_media_sources() -> list[dict[str, Any]]:
 
     logger.info(
         "media_source_registry_loaded",
+        path=str(path),
         total=len(sources),
         rss_sources=rss_count,
         html_sources=html_count,
     )
-    _SOURCES_CACHE = sources
-    return _SOURCES_CACHE
+    _SOURCES_CACHE = (path_key, mtime, sources)
+    return sources
 
 
 def get_sources_by_priority() -> dict[int, list[dict[str, Any]]]:

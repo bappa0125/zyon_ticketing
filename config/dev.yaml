@@ -24,6 +24,8 @@ scheduler:
   article_topics_batch_size: 30
   reddit_interval_minutes: 120
   youtube_interval_minutes: 120
+  # Official YouTube Data API ingest (separate from Apify youtube_monitor)
+  youtube_official_interval_minutes: 360
   crawler_enqueue_interval_minutes: 30
   forum_ingestion_interval_minutes: 360
 
@@ -177,6 +179,30 @@ youtube_trending:
   llm:
     model: openrouter/free
     max_tokens: 800
+
+# Official YouTube Data API v3 — persistent video docs for brand/narrative (no scraping)
+# Uses YOUTUBE_API_KEY (same as youtube_trending). Tune limits to stay under daily quota.
+youtube_official:
+  enabled: true
+  api_key: ""
+  mongodb:
+    database: chat
+    collection: youtube_intel_videos
+  # Hard caps per scheduler run
+  max_total_videos_per_run: 35
+  max_channels_per_run: 5
+  max_playlist_items_per_channel: 12
+  max_searches_per_run: 2
+  max_results_per_search: 15
+  search_order: date
+  discovery_search_queries:
+    - stock market India news
+    - commodity trading India
+  monitor_channel_ids: []
+  delay_seconds_between_api_calls: 0.5
+  # commentThreads.list = 1 unit per video — keep 0 until you need comments
+  max_videos_for_comment_fetch: 0
+  max_comment_threads_per_video: 12
 
 # Narrative Shift Intelligence — API-based pipeline
 narrative_shift:

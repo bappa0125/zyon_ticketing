@@ -23,6 +23,12 @@ interface DashboardData {
   coverage: { entity: string; mentions: number }[];
   by_domain?: DomainRow[];
   pr_summary?: string;
+  meta?: {
+    unified_mentions_count?: number;
+    article_documents_in_window?: number;
+    media_sources_count?: number;
+    articles_indexed_scan_error?: string | null;
+  };
 }
 
 function formatDate(d: Date): string {
@@ -106,7 +112,9 @@ export default function ReportsPage() {
     setLoadingDashboard(true);
     try {
       const params = new URLSearchParams({ client, range: rangeParam() });
-      const res = await fetch(`${getApiBase()}/media-intelligence/dashboard?${params}`);
+      const res = await fetch(`${getApiBase()}/media-intelligence/dashboard?${params}`, {
+        cache: "no-store",
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
       setDashboardData(json);
@@ -277,6 +285,7 @@ export default function ReportsPage() {
                   loading={loadingDashboard}
                   onSelectDomain={() => {}}
                   selectedDomain={null}
+                  pipelineMeta={dashboardData?.meta}
                 />
               </section>
             )}

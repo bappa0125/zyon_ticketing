@@ -11,6 +11,13 @@ import { CoverageByDomain, type DomainRow } from "@/components/MediaIntelligence
 import { PRSummaryCard } from "@/components/MediaIntelligence/PRSummaryCard";
 import { getApiBase } from "@/lib/api";
 
+interface DashboardMeta {
+  unified_mentions_count?: number;
+  article_documents_in_window?: number;
+  media_sources_count?: number;
+  articles_indexed_scan_error?: string | null;
+}
+
 interface DashboardData {
   client: string;
   competitors: string[];
@@ -22,6 +29,7 @@ interface DashboardData {
   topics: { topic: string; mentions: number }[];
   by_domain?: DomainRow[];
   pr_summary?: string;
+  meta?: DashboardMeta;
 }
 
 const RANGE_OPTIONS = [
@@ -77,7 +85,8 @@ export default function MediaIntelligencePage() {
     (async () => {
       try {
         const res = await fetch(
-          `${getApiBase()}/media-intelligence/dashboard?${params.toString()}`
+          `${getApiBase()}/media-intelligence/dashboard?${params.toString()}`,
+          { cache: "no-store" }
         );
         if (!res.ok) throw new Error("Dashboard failed");
         const json = await res.json();
@@ -242,6 +251,7 @@ export default function MediaIntelligencePage() {
                   loading={loading}
                   onSelectDomain={(d) => setSelectedDomain(d)}
                   selectedDomain={selectedDomain}
+                  pipelineMeta={data?.meta}
                 />
               </div>
             </section>

@@ -252,6 +252,22 @@ async def _phase_youtube_narrative_async(state: RunState) -> StepResult:
         return StepResult("youtube_narrative", False, time.monotonic() - start, message=str(e))
 
 
+async def _phase_youtube_official_async(state: RunState) -> StepResult:
+    cfg = __import__("app.config", fromlist=["get_config"]).get_config()
+    yo = cfg.get("youtube_official") or {}
+    if not (isinstance(yo, dict) and yo.get("enabled", False)):
+        return StepResult("youtube_official", True, 0, "skipped (disabled in config)")
+    start = time.monotonic()
+    if state.dry_run:
+        return StepResult("youtube_official", True, 0, "dry-run")
+    try:
+        from app.services.youtube_official_ingest_service import run_youtube_official_ingest
+        result = await run_youtube_official_ingest()
+        return StepResult("youtube_official", True, time.monotonic() - start, result=str(result))
+    except Exception as e:
+        return StepResult("youtube_official", False, time.monotonic() - start, message=str(e))
+
+
 async def _phase_narrative_shift_async(state: RunState) -> StepResult:
     cfg = __import__("app.config", fromlist=["get_config"]).get_config()
     ns = cfg.get("narrative_shift") or {}
@@ -405,6 +421,7 @@ def main():
             "youtube_monitor": "youtube_monitor",
             "reddit_trending": "reddit_trending",
             "youtube_narrative": "youtube_narrative",
+            "youtube_official": "youtube_official",
             "narrative_shift": "narrative_shift",
             "narrative_daily": "narrative_daily",
             "ai_search_narrative": "ai_search_narrative",
@@ -448,6 +465,7 @@ def main():
         "youtube_monitor": "youtube_monitor",
         "reddit_trending": "reddit_trending",
         "youtube_narrative": "youtube_narrative",
+        "youtube_official": "youtube_official",
         "narrative": ["narrative_shift", "narrative_daily"],
         "narrative_shift": "narrative_shift",
         "narrative_daily": "narrative_daily",
@@ -546,6 +564,7 @@ async def _run_all_async(state: RunState) -> None:
         ("ai_summary", _phase_ai_summary_async),
         ("reddit_trending", _phase_reddit_trending_async),
         ("youtube_narrative", _phase_youtube_narrative_async),
+        ("youtube_official", _phase_youtube_official_async),
         ("narrative_shift", _phase_narrative_shift_async),
         ("narrative_daily", _phase_narrative_daily_async),
         ("ai_search_narrative", _phase_ai_search_narrative_async),

@@ -2,7 +2,11 @@
 
 import { useState, useEffect } from "react";
 import { MediaTable } from "@/components/MediaTable";
-import { CoverageByDomain, type DomainRow } from "@/components/MediaIntelligence/CoverageByDomain";
+import {
+  CoverageByDomain,
+  type DomainRow,
+  type PipelineMeta,
+} from "@/components/MediaIntelligence/CoverageByDomain";
 import Link from "next/link";
 import { getApiBase } from "@/lib/api";
 
@@ -15,6 +19,7 @@ export default function MediaPage() {
   const [clients, setClients] = useState<{ name: string }[]>([]);
   const [loadingClients, setLoadingClients] = useState(true);
   const [byDomain, setByDomain] = useState<DomainRow[]>([]);
+  const [coverageMeta, setCoverageMeta] = useState<PipelineMeta | undefined>(undefined);
   const [dashboardClient, setDashboardClient] = useState<string>("");
   const [dashboardCompetitors, setDashboardCompetitors] = useState<string[]>([]);
   const [loadingCoverage, setLoadingCoverage] = useState(false);
@@ -58,6 +63,7 @@ export default function MediaPage() {
   useEffect(() => {
     if (!clientFilter.trim()) {
       setByDomain([]);
+      setCoverageMeta(undefined);
       setDashboardClient("");
       setDashboardCompetitors([]);
       setLoadingCoverage(false);
@@ -68,18 +74,21 @@ export default function MediaPage() {
     (async () => {
       try {
         const res = await fetch(
-          `${getApiBase()}/media-intelligence/dashboard?client=${encodeURIComponent(clientFilter)}&range=7d`
+          `${getApiBase()}/media-intelligence/dashboard?client=${encodeURIComponent(clientFilter)}&range=30d`,
+          { cache: "no-store" }
         );
         if (!res.ok) throw new Error("Dashboard failed");
         const json = await res.json();
         if (!cancelled) {
           setByDomain(json.by_domain ?? []);
+          setCoverageMeta(json.meta);
           setDashboardClient(json.client ?? clientFilter);
           setDashboardCompetitors(json.competitors ?? []);
         }
       } catch {
         if (!cancelled) {
           setByDomain([]);
+          setCoverageMeta(undefined);
           setDashboardClient(clientFilter);
           setDashboardCompetitors([]);
         }
@@ -143,12 +152,14 @@ export default function MediaPage() {
         {clientFilter.trim() && (
           <section className="mb-6">
             <h2 className="text-lg font-medium text-zinc-200 mb-3">Coverage by source</h2>
+            <p className="text-xs text-zinc-500 mb-2">Using last 30 days (same as Media Intel when set to 30d).</p>
             <CoverageByDomain
               byDomain={byDomain}
               entities={entities}
               clientName={dashboardClient}
               competitors={dashboardCompetitors}
               loading={loadingCoverage}
+              pipelineMeta={coverageMeta}
             />
           </section>
         )}

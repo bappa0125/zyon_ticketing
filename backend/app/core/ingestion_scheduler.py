@@ -352,6 +352,23 @@ def _job_youtube_narrative():
         logger.exception("scheduler_job_failed", job="youtube_narrative", error=str(e))
 
 
+def _job_youtube_official_ingest():
+    """Scheduled job: YouTube Data API v3 only — channel uploads + limited search → youtube_intel_videos."""
+    if _skip_if_backfill("youtube_official_ingest"):
+        return
+    yo_cfg = get_config().get("youtube_official")
+    if not isinstance(yo_cfg, dict) or not yo_cfg.get("enabled", False):
+        return
+    from app.services.youtube_official_ingest_service import run_youtube_official_ingest
+
+    logger.info("scheduler_job_start", job="youtube_official_ingest")
+    try:
+        result = asyncio.run(run_youtube_official_ingest())
+        logger.info("scheduler_job_complete", job="youtube_official_ingest", result=result)
+    except Exception as e:
+        logger.exception("scheduler_job_failed", job="youtube_official_ingest", error=str(e))
+
+
 def start_scheduler():
     """Start the ingestion scheduler if enabled in config."""
     global _scheduler
@@ -367,6 +384,7 @@ def start_scheduler():
     entity_min = sched_cfg.get("entity_mentions_interval_minutes", 15)
     reddit_min = sched_cfg.get("reddit_interval_minutes", 120)
     youtube_min = sched_cfg.get("youtube_interval_minutes", 120)
+    youtube_official_min = sched_cfg.get("youtube_official_interval_minutes", 360)
     crawler_min = sched_cfg.get("crawler_enqueue_interval_minutes", 30)
     forum_min = sched_cfg.get("forum_ingestion_interval_minutes", 360)
     sentiment_min = sched_cfg.get("entity_mentions_sentiment_interval_minutes", 20)
@@ -388,6 +406,18 @@ def start_scheduler():
     _scheduler.add_job(_job_forum_ingestion, "interval", minutes=forum_min, id="forum_ingestion")
     if reddit_trending_cfg.get("enabled", False):
         _scheduler.add_job(_job_reddit_trending, "interval", minutes=reddit_trending_min, id="reddit_trending")
+
+    yo_cfg = cfg.get("youtube_official")
+    if isinstance(yo_cfg, dict) and yo_cfg.get("enabled", False):
+        try:
+            _scheduler.add_job(
+                _job_youtube_official_ingest,
+                "interval",
+                minutes=max(30, int(youtube_official_min)),
+                id="youtube_official_ingest",
+            )
+        except Exception as e:
+            logger.warning("youtube_official_ingest job not scheduled", error=str(e))
 
     _scheduler.add_job(_job_ai_brief_daily, "cron", hour=6, minute=0, id="ai_brief_daily")
     _scheduler.add_job(_job_pr_report_daily, "cron", hour=5, minute=30, id="pr_report_daily")
@@ -461,6 +491,7 @@ def start_scheduler():
         entity_mentions_interval_minutes=entity_min,
         reddit_interval_minutes=reddit_min,
         youtube_interval_minutes=youtube_min,
+        youtube_official_interval_minutes=youtube_official_min,
         crawler_enqueue_interval_minutes=crawler_min,
         forum_ingestion_interval_minutes=forum_min,
         entity_mentions_sentiment_interval_minutes=sentiment_min,

@@ -19,10 +19,24 @@ This document lists every pipeline that **writes** data into MongoDB: pipeline n
 | 9. Crawler snapshots / competitors | `web_snapshots`, `competitors` | Crawler / competitor flows using `snapshot_store.py` |
 | 10. Crawler alerts | `alerts` | Crawler using `crawler/alert_store.py` |
 | 11. YouTube narrative | `youtube_narrative_videos`, `youtube_narrative_summaries` | Scheduler (daily 8:00 UTC) or `POST /api/social/youtube-narrative/refresh` |
+| 11b. YouTube official ingest | `youtube_intel_videos` | Scheduler (`youtube_official_interval_minutes`) or `scripts/run_youtube_official_ingest.py` |
 | 12. AI search narrative | `ai_search_answers` | Scheduler (daily 10:30 UTC) or `POST /api/social/ai-search-narrative/refresh` |
 | 13. AI Search Visibility (Phase 1) | `visibility_answers`, `visibility_runs`, `visibility_weekly_snapshots`, `visibility_recommendations` | Scheduler (weekly Sun 02:00 UTC) or `POST /api/social/ai-search-visibility/refresh` |
 
 *Chat and app data (conversations, messages) are written by `app/services/mongodb.py` and are not ingestion pipelines.*
+
+### Client config — single source (names, aliases, ignore patterns)
+
+These all use the **same** clients file:
+
+| Mechanism | Loader |
+|-----------|--------|
+| Async API / Redis cache | `client_config_loader.load_clients()` |
+| Workers & sync pipelines | `client_config_loader.load_clients_sync()` (mtime-based in-process cache) |
+
+**File:** `config/clients.yaml` by default. If `executive_competitor_analysis.use_this_file` is enabled in app config, the configured executive YAML (e.g. `executive_competitor_analysis.yml`) is used instead.
+
+**Entity detection** (`entity_detection_service`) uses **canonical names + aliases** to match text and applies **ignore_patterns** when building the alias/ignore map. **Mention validation** (`mention_context_validation`) applies **ignore_patterns** and **context_keywords** from the same config (competitors inherit the client’s `context_keywords` unless a competitor dict defines its own `context_keywords`). **Monitoring pipeline config** (`pipeline_config.get_pipeline_config`) loads clients via `load_clients_sync()` so monitored entities match detection.
 
 ---
 
@@ -39,6 +53,8 @@ This document lists every pipeline that **writes** data into MongoDB: pipeline n
 `python backend/scripts/run_rss_ingestion.py`
 
 **Responsible for:** Filling `rss_items` with new RSS entries. Downstream: article fetcher reads from `rss_items`.
+
+**Feed URLs & discovery:** See `docs/RSS_FEED_DISCOVERY.md` (e.g. multiple official Moneycontrol feeds, browser-like RSS headers).
 
 ---
 
@@ -117,6 +133,23 @@ This document lists every pipeline that **writes** data into MongoDB: pipeline n
 **Trigger:** Scheduler daily at 8:00 UTC, or `POST /api/social/youtube-narrative/refresh`.
 
 **Collections:** `youtube_narrative_videos` (raw videos per date), `youtube_narrative_summaries` (one doc per date: narrative, themes, sentiment, top_channels, popularity_score).
+
+---
+
+## 5b-official. YouTube official ingest (Data API v3) → `youtube_intel_videos`
+
+**What it does:** Fetches video metadata via **only** YouTube Data API v3 (no scraping): monitored channel uploads (`channels.list` + `playlistItems.list`) plus a **limited** number of `search.list` queries. Optional top comments (`commentThreads.list`, **1 quota unit per video** — disabled by default). Upserts one document per `video_id` for brand/narrative analytics (title, description, stats, tags, duration, thumbnails).
+
+| File | Role |
+|------|------|
+| `backend/app/services/youtube_official_ingest_service.py` | Quota-aware orchestration; `run_youtube_official_ingest()`. |
+| `backend/scripts/run_youtube_official_ingest.py` | On-demand run. |
+
+**Config:** `youtube_official` in dev.yaml / prod.yaml; **`YOUTUBE_API_KEY`** (same env as `youtube_trending`). See `docs/YOUTUBE_OFFICIAL_INGESTION.md`.
+
+**Trigger:** In-process scheduler job `youtube_official_ingest` when `youtube_official.enabled` is true; master backfill phase `youtube_official`; or the script above.
+
+**Collections:** `youtube_intel_videos` (`pipeline: youtube_official`).
 
 ---
 
@@ -293,11 +326,12 @@ The backend runs an in-process ingestion scheduler when `scheduler.enabled: true
 | YouTube monitor | `youtube_interval_minutes` (default 120) | `social_posts` |
 | Crawler enqueue | `crawler_enqueue_interval_minutes` (default 30) | Enqueues `crawl_website` jobs to Redis |
 | YouTube narrative (cron) | Daily 08:00 UTC | `youtube_narrative_videos`, `youtube_narrative_summaries` |
+| YouTube official ingest | `youtube_official_interval_minutes` (default 360) | `youtube_intel_videos` |
 | Narrative intelligence daily (cron) | Daily 09:00 UTC | `narrative_intelligence_daily` |
 | AI search narrative (cron) | Daily 10:30 UTC | `ai_search_answers` |
 | AI Search Visibility (cron) | Weekly Sunday 02:00 UTC | `visibility_answers`, `visibility_runs`, `visibility_weekly_snapshots`, `visibility_recommendations` |
 
-Config keys: `scheduler.enabled`, `scheduler.rss_interval_hours`, `scheduler.article_fetcher_interval_minutes`, `scheduler.entity_mentions_interval_minutes`, `scheduler.reddit_interval_minutes`, `scheduler.youtube_interval_minutes`, `scheduler.crawler_enqueue_interval_minutes`. Set `scheduler.enabled: false` to disable.
+Config keys: `scheduler.enabled`, `scheduler.rss_interval_hours`, `scheduler.article_fetcher_interval_minutes`, `scheduler.entity_mentions_interval_minutes`, `scheduler.reddit_interval_minutes`, `scheduler.youtube_interval_minutes`, `scheduler.youtube_official_interval_minutes`, `scheduler.crawler_enqueue_interval_minutes`. Set `scheduler.enabled: false` to disable.
 
 ---
 
@@ -311,6 +345,7 @@ Config keys: `scheduler.enabled`, `scheduler.rss_interval_hours`, `scheduler.art
 | `run_media_monitor()` | Live search (Google News, DuckDuckGo) | `media_articles` |
 | `run_reddit_monitor()` | Reddit mentions | `social_posts` |
 | `run_youtube_monitor()` | YouTube mentions | `social_posts` |
+| `python backend/scripts/run_youtube_official_ingest.py` | YouTube Data API v3 official ingest | `youtube_intel_videos` |
 | `run_social_monitor()` | Apify social mentions | `social_posts` |
 | `run_index_cycle()` (media_index) | Crawl + index (media_index path) | `media_articles`, Qdrant |
 | `docker compose exec backend python scripts/run_narrative_shift_backfill.py` | Narrative shift (YouTube+Reddit+news clustering) | (in-memory, served via API) |

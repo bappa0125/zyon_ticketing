@@ -23,13 +23,10 @@ def _get_config_dir() -> Path:
 
 
 def _load_clients_for_pipeline() -> list[dict[str, Any]]:
-    """Load clients from config/clients.yaml (read-only, no Redis)."""
-    path = _get_config_dir() / "clients.yaml"
-    if not path.exists():
-        return []
-    with open(path) as f:
-        data = yaml.safe_load(f) or {}
-    return data.get("clients", [])
+    """Load clients from the same file as entity detection / API (executive file when enabled)."""
+    from app.core.client_config_loader import load_clients_sync
+
+    return load_clients_sync()
 
 
 def _load_media_sources_for_pipeline() -> list[dict[str, Any]]:
@@ -79,7 +76,7 @@ class PipelineConfig:
 def get_pipeline_config() -> PipelineConfig:
     """
     Load and return the monitoring ingestion pipeline configuration.
-    STEP 1: Configuration only. Uses config/clients.yaml, config/media_sources.yaml,
+    STEP 1: Configuration only. Uses active clients file (clients.yaml or executive), config/media_sources.yaml,
     and config/monitoring.yaml. Does not modify any existing module.
     """
     global _CONFIG_CACHE

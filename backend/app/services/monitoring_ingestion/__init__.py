@@ -7,6 +7,7 @@ from app.services.monitoring_ingestion.pipeline_config import (
 )
 from app.services.monitoring_ingestion.media_source_registry import (
     load_media_sources,
+    clear_media_sources_cache,
     get_sources_by_priority,
     get_rss_sources,
     get_html_sources,
@@ -17,6 +18,7 @@ from app.services.monitoring_ingestion.crawl_scheduler import (
     is_ready,
     mark_crawled,
     get_last_crawled,
+    scheduler_source_key,
 )
 from app.services.monitoring_ingestion.crawl_queue import (
     build_crawl_queue,
@@ -28,6 +30,7 @@ __all__ = [
     "get_pipeline_config",
     "PipelineConfig",
     "load_media_sources",
+    "clear_media_sources_cache",
     "get_sources_by_priority",
     "get_rss_sources",
     "get_html_sources",
@@ -36,6 +39,7 @@ __all__ = [
     "is_ready",
     "mark_crawled",
     "get_last_crawled",
+    "scheduler_source_key",
     "build_crawl_queue",
     "get_ordered_ready_sources",
     "CrawlQueues",

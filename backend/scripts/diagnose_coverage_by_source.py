@@ -36,10 +36,25 @@ async def main():
     em_with_sd = await em.count_documents({"source_domain": {"$exists": True, "$nin": [None, ""]}})
     em_empty_sd = await em.count_documents({"$or": [{"source_domain": {"$in": [None, ""]}}, {"source_domain": {"$exists": False}}]})
     em_recent = await em.count_documents({"$or": [{"published_at": {"$gte": cutoff_7d}}, {"timestamp": {"$gte": cutoff_7d}}]})
-    em_entities_7d = await em.count_documents({
-        "entity": {"$in": entities},
-        "$or": [{"published_at": {"$gte": cutoff_7d}}, {"timestamp": {"$gte": cutoff_7d}}],
-    })
+    try:
+        from app.services.media_intelligence_service import _mongo_case_insensitive_entity_filter
+
+        em_entities_7d = await em.count_documents({
+            "$and": [
+                _mongo_case_insensitive_entity_filter("entity", entities),
+                {
+                    "$or": [
+                        {"published_at": {"$gte": cutoff_7d}},
+                        {"timestamp": {"$gte": cutoff_7d}},
+                    ],
+                },
+            ],
+        })
+    except Exception:
+        em_entities_7d = await em.count_documents({
+            "entity": {"$in": entities},
+            "$or": [{"published_at": {"$gte": cutoff_7d}}, {"timestamp": {"$gte": cutoff_7d}}],
+        })
 
     art_total = await art.count_documents({})
     art_with_sd = await art.count_documents({"source_domain": {"$exists": True, "$nin": [None, ""]}})
@@ -54,13 +69,21 @@ async def main():
     ]
     sd_samples = list(await em.aggregate(pipeline).to_list(length=20))
 
-    # Media sources domains for match check
+    # Full media_sources domain set (same mapping as Media Intelligence dashboard)
+    config_domain_set: set[str] = set()
+    domain_to_name: dict[str, str] = {}
     try:
         from app.services.monitoring_ingestion.media_source_registry import load_media_sources
+        from app.services.media_intelligence_service import _map_to_config_domain, _normalize_domain
 
-        config_domains = [s.get("domain") for s in load_media_sources() if s.get("domain")][:15]
+        for src in load_media_sources():
+            d = _normalize_domain(src.get("domain") or "")
+            if d:
+                config_domain_set.add(d)
+                domain_to_name[d] = (src.get("name") or d)[:80]
     except Exception:
-        config_domains = []
+        _map_to_config_domain = None  # type: ignore
+        _normalize_domain = None  # type: ignore
 
     print("=== Coverage by Source diagnostic ===\n")
     print(f"Entities (Sahi + competitors): {entities}\n")
@@ -76,14 +99,25 @@ async def main():
     print(f"  with source_domain: {art_with_sd}")
     print(f"  empty/missing source_domain: {art_empty_sd}")
     print()
-    print("Top source_domain values in entity_mentions:")
+    print("Top source_domain values in entity_mentions (✓ = maps to a row in Coverage by source):")
     for s in sd_samples:
-        d = s["_id"] or "(empty)"
+        d_raw = s["_id"] or "(empty)"
         c = s["count"]
-        in_config = "✓" if d in config_domains or any(d.endswith("." + cd) or d == cd for cd in config_domains) else "?"
-        print(f"  {d}: {c} {in_config}")
+        if _map_to_config_domain and _normalize_domain and isinstance(d_raw, str):
+            norm = _normalize_domain(d_raw) or d_raw.strip().lower()
+            mapped = _map_to_config_domain(norm, config_domain_set)
+            if mapped:
+                label = "✓"
+                extra = f" → table key '{domain_to_name.get(mapped, mapped)}' ({mapped})"
+            else:
+                label = "✗"
+                extra = " (not in media_sources.yaml — dashboard shows 0 for that outlet row)"
+        else:
+            label = "?"
+            extra = ""
+        print(f"  {d_raw}: {c}  {label}{extra}")
     print()
-    print("Sample config domains (from media_sources):", config_domains[:10])
+    print(f"media_sources.yaml: {len(config_domain_set)} configured domains (full list used for ✓/✗).")
     print()
     if em_entities_7d == 0:
         print(">>> No entity_mentions for your entities in last 7d. Run RSS + article fetcher + entity_mentions pipeline.")
@@ -92,7 +126,8 @@ async def main():
     elif not sd_samples:
         print(">>> No source_domain values found. Check data pipeline.")
     else:
-        print(">>> If coverage still zeros, source_domain values may not match media_sources keys.")
+        print(">>> Rows with ✗ are expected to show 0 in 'Coverage by source' (domain not in media_sources).")
+        print(">>> Outlets in YAML with 0 mentions: ingestion/entity detection never wrote mentions for that domain.")
 
 
 if __name__ == "__main__":

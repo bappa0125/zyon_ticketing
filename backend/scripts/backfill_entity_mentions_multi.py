@@ -7,11 +7,12 @@ Enterprise-grade: batched, rate-limited, idempotent.
 Usage:
   python scripts/backfill_entity_mentions_multi.py [--batch 100] [--limit 500]
   python scripts/backfill_entity_mentions_multi.py --batch 50 --delay 1.0 --limit 2000
+  python scripts/backfill_entity_mentions_multi.py --reprocess-days 30 --limit 3000   # re-run last N days
 """
 import argparse
 import asyncio
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -23,7 +24,7 @@ logger = get_logger(__name__)
 
 COLLECTION_ARTICLE_DOCUMENTS = "article_documents"
 COLLECTION_ENTITY_MENTIONS = "entity_mentions"
-DETECTION_WINDOW = 8000
+DETECTION_WINDOW = 15000
 CONTENT_QUALITY_FULL_TEXT = "full_text"
 CONTENT_QUALITY_SNIPPET = "snippet"
 _FORUM_DOMAINS = {"tradingqna.com", "traderji.com", "valuepickr.com"}
@@ -45,6 +46,7 @@ async def run_backfill(
     limit: int | None = 500,
     delay_between_batches_sec: float = 0.5,
     skip_already_processed: bool = True,
+    reprocess_days: int | None = None,
 ) -> dict[str, int]:
     from app.services.entity_detection_service import detect_entities
     from app.services.mention_context_validation import validate_mention_context
@@ -54,13 +56,20 @@ async def run_backfill(
     article_coll = db[COLLECTION_ARTICLE_DOCUMENTS]
     mentions_coll = db[COLLECTION_ENTITY_MENTIONS]
 
-    query = {}
-    if skip_already_processed:
+    query: dict = {}
+    cursor_sort = [("fetched_at", -1)]
+    if reprocess_days is not None:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=reprocess_days)
+        # Reprocess by time window (ignores entity_mentions_processed_at)
+        query["$or"] = [{"fetched_at": {"$gte": cutoff}}, {"published_at": {"$gte": cutoff}}]
+        skip_already_processed = False
+    elif skip_already_processed:
         query["$or"] = [
             {"entity_mentions_processed_at": {"$exists": False}},
             {"entity_mentions_processed_at": None},
         ]
-    cursor = article_coll.find(query).sort("fetched_at", 1)
+
+    cursor = article_coll.find(query).sort("fetched_at", -1)
     if limit:
         cursor = cursor.limit(limit)
 
@@ -78,7 +87,7 @@ async def run_backfill(
             title = (doc.get("title") or "")[:500]
             source_domain = (doc.get("source_domain") or "")[:200]
             published_at = doc.get("published_at") or doc.get("fetched_at")
-            article_text = (doc.get("article_text") or "")[:10000]
+            article_text = (doc.get("article_text") or "")[:DETECTION_WINDOW]
             rss_summary = (doc.get("summary") or "").strip()[:2000]
 
             if not url:
@@ -113,9 +122,14 @@ async def run_backfill(
             sd = (source_domain or "").strip().lower()
             mention_type = "forum" if sd in _FORUM_DOMAINS else "article"
 
+            now_utc = datetime.now(timezone.utc)
+            # IMPORTANT: never delete all mentions for a URL before inserts succeed.
+            # A failed validation or exception would leave zero mentions (counts drop).
             for entity in entities_found:
-                if not validate_mention_context(entity, validation_text):
+                if not validate_mention_context(entity, validation_text, source_domain):
                     continue
+                if reprocess_days is not None:
+                    await mentions_coll.delete_many({"url": url, "entity": entity})
                 existing = await mentions_coll.find_one({"entity": entity, "url": url})
                 if existing:
                     continue
@@ -124,6 +138,9 @@ async def run_backfill(
                     "title": title,
                     "source_domain": source_domain,
                     "published_at": published_at,
+                    # Always set so dashboard range (7d/30d) includes mentions indexed recently
+                    # even when the article published_at is older.
+                    "timestamp": now_utc,
                     "summary": summary,
                     "sentiment": None,
                     "url": url[:2000],
@@ -173,6 +190,13 @@ def main():
         action="store_true",
         help="Process all docs including those already marked entity_mentions_processed_at",
     )
+    p.add_argument(
+        "--reprocess-days",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Reprocess articles from last N days: delete mentions for their URLs, re-detect entities, set timestamp.",
+    )
     args = p.parse_args()
     result = asyncio.run(
         run_backfill(
@@ -180,6 +204,7 @@ def main():
             limit=args.limit,
             delay_between_batches_sec=max(0.0, args.delay),
             skip_already_processed=not args.no_skip_processed,
+            reprocess_days=args.reprocess_days,
         )
     )
     print(result)

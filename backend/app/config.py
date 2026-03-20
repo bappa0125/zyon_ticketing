@@ -74,6 +74,7 @@ def get_config() -> dict[str, Any]:
         "scheduler": base.get("scheduler", {}),
         "reddit_trending": base.get("reddit_trending", {}),
         "youtube_trending": base.get("youtube_trending") if isinstance(base.get("youtube_trending"), dict) else {},
+        "youtube_official": base.get("youtube_official") if isinstance(base.get("youtube_official"), dict) else {},
         "narrative_shift": base.get("narrative_shift") if isinstance(base.get("narrative_shift"), dict) else {},
         "narrative_intelligence_daily": base.get("narrative_intelligence_daily") if isinstance(base.get("narrative_intelligence_daily"), dict) else {},
         "narrative_positioning": base.get("narrative_positioning") if isinstance(base.get("narrative_positioning"), dict) else {},

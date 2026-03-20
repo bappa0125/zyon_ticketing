@@ -1,10 +1,7 @@
 """Multi-layer entity detection: ignore → alias → regex → NER → embedding/LLM fallback."""
 import hashlib
 import re
-from pathlib import Path
 from typing import Any, NamedTuple, Optional
-
-import yaml
 
 from app.config import get_config
 from app.core.logging import get_logger
@@ -61,21 +58,14 @@ class EntityDetectionResult(NamedTuple):
 
 
 def _load_clients_sync() -> list[dict[str, Any]]:
-    """Load clients from file (sync, no Redis cache)."""
-    project_root = Path(__file__).resolve().parent.parent.parent
-    config_dir = project_root / "config"
-    if not config_dir.exists():
-        config_dir = Path("/app/config")
-    path = config_dir / "clients.yaml"
-    if not path.exists():
-        return []
-    with open(path) as f:
-        data = yaml.safe_load(f) or {}
-    return data.get("clients", [])
+    """Load clients from the same file as the API (clients.yaml or executive file when enabled)."""
+    from app.core.client_config_loader import load_clients_sync
+
+    return load_clients_sync()
 
 
 def _build_entity_map() -> tuple[dict[str, list[str]], list[str], list[tuple[str, str]]]:
-    """Build entity -> aliases (lowercase), ignore patterns, and precompiled alias lookup from clients.yaml only."""
+    """Build entity -> aliases (lowercase), ignore patterns, and precompiled alias lookup from active clients config."""
     clients = _load_clients_sync()
 
     entity_map: dict[str, list[str]] = {}

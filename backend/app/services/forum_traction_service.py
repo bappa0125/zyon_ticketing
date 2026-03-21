@@ -120,3 +120,96 @@ async def get_forum_topics_traction(
         "client": client,
         "range_days": range_days,
     }
+
+
+async def get_forum_narrative_tag_traction(
+    client: Optional[str] = None,
+    range_days: int = 14,
+    top_n: int = TOP_TOPICS_DEFAULT,
+) -> dict[str, Any]:
+    """
+    Traction of narrative taxonomy tags within forum mentions (TradingQnA, ValuePickr, HN, Traderji).
+    Groups by narrative_primary (fallback: first of narrative_tags). Supports gap/positioning views.
+    """
+    await get_mongo_client()
+    from app.services.mongodb import get_db
+
+    db = get_db()
+    em_coll = db[ENTITY_MENTIONS_COLLECTION]
+    cutoff = datetime.now(timezone.utc) - timedelta(days=min(range_days, 90))
+
+    entities_filter: Optional[list[str]] = None
+    if client and client.strip():
+        clients_list = await load_clients()
+        client_obj = next(
+            (c for c in clients_list if _str(c.get("name")).lower() == client.strip().lower()),
+            None,
+        )
+        if client_obj:
+            entities_filter = get_entity_names(client_obj)
+
+    match: dict[str, Any] = {
+        "type": "forum",
+        "$or": [
+            {"published_at": {"$gte": cutoff}},
+            {"timestamp": {"$gte": cutoff}},
+        ],
+    }
+    if entities_filter:
+        match["entity"] = {"$in": entities_filter}
+
+    pipeline = [
+        {"$match": match},
+        {
+            "$project": {
+                "tag": {
+                    "$ifNull": [
+                        "$narrative_primary",
+                        {"$arrayElemAt": ["$narrative_tags", 0]},
+                    ]
+                },
+                "forum_site": 1,
+                "title": 1,
+                "url": 1,
+                "entity": 1,
+            }
+        },
+        {"$match": {"tag": {"$nin": [None, ""]}}},
+        {
+            "$group": {
+                "_id": {"tag": "$tag", "forum_site": {"$ifNull": ["$forum_site", "unknown"]}},
+                "mention_count": {"$sum": 1},
+                "titles": {"$addToSet": "$title"},
+                "urls": {"$addToSet": "$url"},
+            }
+        },
+        {"$sort": {"mention_count": -1}},
+        {"$limit": min(top_n * 8, 200)},
+    ]
+
+    rows: list[dict[str, Any]] = []
+    async for doc in em_coll.aggregate(pipeline):
+        tid = _str((doc.get("_id") or {}).get("tag"))
+        fsite = _str((doc.get("_id") or {}).get("forum_site"))
+        if not tid:
+            continue
+        titles = [t for t in (doc.get("titles") or []) if _str(t)][:SAMPLE_TITLES_PER_TOPIC]
+        urls = [u for u in (doc.get("urls") or []) if _str(u)][:SAMPLE_TITLES_PER_TOPIC]
+        rows.append({
+            "narrative_tag": tid,
+            "forum_site": fsite or "unknown",
+            "mention_count": doc.get("mention_count", 0),
+            "sample_titles": titles,
+            "sample_urls": urls,
+        })
+
+    return {
+        "narrative_tags": rows,
+        "client": client,
+        "range_days": range_days,
+        "forum_narrative_frame": {
+            "surface": "forum",
+            "role_in_narrative": "amplifier",
+            "note": "Forum threads redistribute and debate narratives; pair with publication sources for full map.",
+        },
+    }

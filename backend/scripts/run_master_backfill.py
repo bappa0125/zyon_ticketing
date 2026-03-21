@@ -357,6 +357,41 @@ async def _phase_sahi_async(state: RunState) -> StepResult:
         return StepResult("sahi_strategic_brief", False, time.monotonic() - start, message=str(e))
 
 
+async def _phase_narrative_positioning_async(state: RunState) -> StepResult:
+    """PR narrative positioning — 1 LLM call per client (feeds briefing Exhibit E)."""
+    cfg = __import__("app.config", fromlist=["get_config"]).get_config()
+    np_cfg = cfg.get("narrative_positioning") or {}
+    if not isinstance(np_cfg, dict) or not np_cfg.get("enabled", True):
+        return StepResult("narrative_positioning", True, 0, "skipped (disabled in config)")
+    start = time.monotonic()
+    if state.dry_run:
+        return StepResult("narrative_positioning", True, 0, "dry-run")
+    try:
+        from app.services.narrative_positioning_service import run_positioning_for_all_clients
+        result = await run_positioning_for_all_clients()
+        return StepResult("narrative_positioning", True, time.monotonic() - start, result=str(result))
+    except Exception as e:
+        return StepResult("narrative_positioning", False, time.monotonic() - start, message=str(e))
+
+
+async def _phase_narrative_briefing_async(state: RunState) -> StepResult:
+    """CXO narrative briefing packs — LLM memo per client, saved to narrative_briefing_snapshots."""
+    cfg = __import__("app.config", fromlist=["get_config"]).get_config()
+    nb_cfg = cfg.get("narrative_briefing") or {}
+    if not isinstance(nb_cfg, dict) or not nb_cfg.get("enabled", True):
+        return StepResult("narrative_briefing", True, 0, "skipped (disabled in config)")
+    start = time.monotonic()
+    if state.dry_run:
+        return StepResult("narrative_briefing", True, 0, "dry-run")
+    try:
+        from app.services.narrative_briefing_service import run_narrative_briefing_for_all_clients
+        result = await run_narrative_briefing_for_all_clients()
+        ok = int(result.get("clients_failed") or 0) == 0
+        return StepResult("narrative_briefing", ok, time.monotonic() - start, result=str(result))
+    except Exception as e:
+        return StepResult("narrative_briefing", False, time.monotonic() - start, message=str(e))
+
+
 async def _phase_ai_brief_async(state: RunState) -> StepResult:
     start = time.monotonic()
     if state.dry_run:
@@ -435,6 +470,8 @@ def main():
             "crawler_enqueue": "crawler_enqueue",
             "executive_report": "executive_competitor_report",
             "executive_competitor_report": "executive_competitor_report",
+            "narrative_briefing": "narrative_briefing",
+            "narrative_positioning": "narrative_positioning",
         }
         only_phase = ONLY_ALIASES.get(only_raw, only_raw)
 
@@ -481,6 +518,8 @@ def main():
         "forum_ingestion": "forum_ingestion",
         "executive_report": "executive_competitor_report",
         "executive_competitor_report": "executive_competitor_report",
+        "narrative_briefing": "narrative_briefing",
+        "narrative_positioning": "narrative_positioning",
     }
     normalized_skip = set()
     for s in state.skip:
@@ -571,6 +610,8 @@ async def _run_all_async(state: RunState) -> None:
         ("ai_search_visibility", _phase_ai_search_visibility_async),
         ("coverage_summary", _phase_coverage_summary_async),
         ("sahi_strategic_brief", _phase_sahi_async),
+        ("narrative_positioning", _phase_narrative_positioning_async),
+        ("narrative_briefing", _phase_narrative_briefing_async),
         ("ai_brief_daily", _phase_ai_brief_async),
         ("executive_competitor_report", _phase_executive_competitor_report_async),
     ]

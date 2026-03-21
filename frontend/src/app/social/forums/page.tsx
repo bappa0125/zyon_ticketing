@@ -20,6 +20,90 @@ interface ForumTopicTraction {
   sample_urls?: string[];
 }
 
+interface ThemeDigestThread {
+  title: string;
+  url: string;
+  strength: number;
+  published_at?: string;
+}
+
+interface ThemeDigestTheme {
+  theme_id: string;
+  label: string;
+  description?: string;
+  thread_count: number;
+  keyword_hit_score: number;
+  sample_threads: ThemeDigestThread[];
+}
+
+interface ThemeDigestSection {
+  forum_site: string;
+  themes: ThemeDigestTheme[];
+}
+
+interface PRDeliverable {
+  id: string;
+  title: string;
+  purpose?: string;
+  executive_summary?: string;
+  bullets?: string[];
+  themes_ranked?: {
+    theme_id: string;
+    label: string;
+    thread_count_total: number;
+    keyword_score_total: number;
+    lead_example?: { title?: string; url?: string; forum_site?: string };
+  }[];
+  example_threads?: {
+    theme_id?: string;
+    theme_label?: string;
+    title?: string;
+    url?: string;
+    forum_site?: string;
+  }[];
+}
+
+interface PRDeliverablesPack {
+  cover_line?: string;
+  deliverables?: PRDeliverable[];
+}
+
+interface ForumThemeDigest {
+  digest_date?: string;
+  range_days?: number;
+  computed_at?: string;
+  disclaimer?: string;
+  forum_sites_configured?: string[];
+  include_reddit?: boolean;
+  surfaces_with_data?: string[];
+  sections?: ThemeDigestSection[];
+  pr_deliverables?: PRDeliverablesPack;
+  stats?: {
+    article_documents_scanned?: number;
+    forum_documents_scored?: number;
+    reddit_posts_scanned?: number;
+    reddit_posts_scored?: number;
+  };
+}
+
+function BoldInline({ text }: { text: string }) {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return (
+    <>
+      {parts.map((part, i) => {
+        if (part.startsWith("**") && part.endsWith("**")) {
+          return (
+            <strong key={i} className="text-[var(--ai-text)]">
+              {part.slice(2, -2)}
+            </strong>
+          );
+        }
+        return <span key={i}>{part}</span>;
+      })}
+    </>
+  );
+}
+
 export default function ForumMentionsPage() {
   const [mentions, setMentions] = useState<ForumMention[]>([]);
   const [loading, setLoading] = useState(true);
@@ -28,6 +112,43 @@ export default function ForumMentionsPage() {
   const [count, setCount] = useState(0);
   const [topicsTraction, setTopicsTraction] = useState<ForumTopicTraction[]>([]);
   const [topicsLoading, setTopicsLoading] = useState(true);
+  const [themeDigest, setThemeDigest] = useState<ForumThemeDigest | null>(null);
+  const [digestSource, setDigestSource] = useState<string>("");
+  const [digestLoading, setDigestLoading] = useState(true);
+  const [digestRefreshing, setDigestRefreshing] = useState(false);
+
+  const fetchThemeDigest = useCallback(async (live: boolean) => {
+    if (live) setDigestRefreshing(true);
+    else setDigestLoading(true);
+    try {
+      const params = new URLSearchParams({ days: "7" });
+      if (live) params.set("live", "true");
+      const res = await fetch(`${getApiBase()}/social/forum-theme-digest?${params}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data: { digest?: ForumThemeDigest; source?: string } = await res.json();
+      setThemeDigest(data.digest ?? null);
+      setDigestSource(data.source ?? "");
+    } catch {
+      setThemeDigest(null);
+      setDigestSource("");
+    } finally {
+      setDigestLoading(false);
+      setDigestRefreshing(false);
+    }
+  }, []);
+
+  const runDigestRefresh = useCallback(async () => {
+    setDigestRefreshing(true);
+    try {
+      const res = await fetch(`${getApiBase()}/social/forum-theme-digest/refresh`, { method: "POST" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await fetchThemeDigest(false);
+    } catch {
+      /* keep prior digest */
+    } finally {
+      setDigestRefreshing(false);
+    }
+  }, [fetchThemeDigest]);
 
   const fetchTopicsTraction = useCallback(async () => {
     setTopicsLoading(true);
@@ -72,6 +193,9 @@ export default function ForumMentionsPage() {
   useEffect(() => {
     fetchTopicsTraction();
   }, [fetchTopicsTraction]);
+  useEffect(() => {
+    fetchThemeDigest(false);
+  }, [fetchThemeDigest]);
 
   const bySource = mentions.reduce<Record<string, number>>((acc, m) => {
     const s = m.source_domain || "—";
@@ -87,6 +211,213 @@ export default function ForumMentionsPage() {
         <p className="app-subheading mb-6">
           Mentions from monitored forums (Traderji, TradingQnA, ValuePickr, etc.). Entity detection runs on ingested forum threads.
         </p>
+
+        <section className="mb-8 rounded-xl border border-[var(--ai-accent)]/25 bg-[var(--ai-accent-dim)]/30 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
+            <h2 className="text-sm font-semibold text-[var(--ai-text)]">
+              Retail discourse themes (unbranded)
+            </h2>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => fetchThemeDigest(true)}
+                disabled={digestLoading || digestRefreshing}
+                className="app-btn-secondary text-xs py-1.5 px-3"
+              >
+                {digestRefreshing ? "Recomputing…" : "Recompute now"}
+              </button>
+              <button
+                type="button"
+                onClick={() => runDigestRefresh()}
+                disabled={digestRefreshing}
+                className="app-btn-secondary text-xs py-1.5 px-3"
+              >
+                Run scheduled job
+              </button>
+            </div>
+          </div>
+          <p className="text-xs text-[var(--ai-muted)] mb-3">
+            <strong>Indian forums</strong> (ValuePickr, TradingQnA, Traderji) from{" "}
+            <code className="text-[var(--ai-accent)]">article_documents</code>
+            {themeDigest?.include_reddit !== false ? (
+              <>
+                {" "}
+                + <strong>Reddit</strong> from <code className="text-[var(--ai-accent)]">social_posts</code>
+              </>
+            ) : null}
+            . Themes: <code className="text-[var(--ai-accent)]">narrative_taxonomy.yaml</code> — no brand entity
+            required. Includes a <strong>3-part PR pack</strong> for weekly retainers. For meme velocity also use{" "}
+            <strong>Social → Reddit trending</strong>.
+          </p>
+          {digestLoading && !themeDigest ? (
+            <div className="py-4 text-center text-[var(--ai-muted)] text-sm">Loading digest…</div>
+          ) : !themeDigest ||
+            (!(themeDigest.sections && themeDigest.sections.length) &&
+              !(themeDigest.pr_deliverables?.deliverables && themeDigest.pr_deliverables.deliverables.length > 0)) ? (
+            <div className="py-4 text-sm text-[var(--ai-muted)]">
+              No digest yet. Ingest forum RSS/HTML threads (and run Reddit monitor), then{" "}
+              <button type="button" className="text-[var(--ai-accent)] underline" onClick={() => runDigestRefresh()}>
+                run the digest job
+              </button>{" "}
+              or <code className="text-xs">GET /api/social/forum-theme-digest?live=true</code>.
+            </div>
+          ) : (
+            <>
+              <p className="text-[10px] uppercase tracking-wider text-[var(--ai-muted)] mb-1">
+                {themeDigest.digest_date} · last {themeDigest.range_days ?? 7}d · {digestSource}
+                {themeDigest.surfaces_with_data?.length
+                  ? ` · surfaces: ${themeDigest.surfaces_with_data.join(", ")}`
+                  : ""}
+                {themeDigest.stats?.forum_documents_scored != null
+                  ? ` · ${themeDigest.stats.forum_documents_scored} forum docs`
+                  : ""}
+                {themeDigest.stats?.reddit_posts_scored != null && themeDigest.stats.reddit_posts_scored > 0
+                  ? ` · ${themeDigest.stats.reddit_posts_scored} reddit posts`
+                  : ""}
+              </p>
+              {themeDigest.disclaimer && (
+                <p className="text-xs text-[var(--ai-text-secondary)] border-l-2 border-[var(--ai-border-strong)] pl-3 mb-4 italic">
+                  {themeDigest.disclaimer}
+                </p>
+              )}
+
+              {themeDigest.pr_deliverables?.cover_line && (
+                <p className="text-sm font-medium text-[var(--ai-text)] mb-3">{themeDigest.pr_deliverables.cover_line}</p>
+              )}
+
+              {themeDigest.pr_deliverables?.deliverables && themeDigest.pr_deliverables.deliverables.length > 0 && (
+                <div className="mb-8 grid gap-4 md:grid-cols-3">
+                  {themeDigest.pr_deliverables.deliverables.map((d) => (
+                    <div
+                      key={d.id}
+                      className="rounded-xl border border-[var(--ai-border)] bg-[var(--ai-surface)] p-4 flex flex-col"
+                    >
+                      <h3 className="text-sm font-semibold text-[var(--ai-accent)] mb-1">{d.title}</h3>
+                      {d.purpose && (
+                        <p className="text-[10px] text-[var(--ai-muted)] uppercase tracking-wide mb-2">{d.purpose}</p>
+                      )}
+                      {d.executive_summary && (
+                        <p className="text-xs text-[var(--ai-text-secondary)] mb-3 leading-relaxed">
+                          <BoldInline text={d.executive_summary} />
+                        </p>
+                      )}
+                      <ul className="text-xs text-[var(--ai-text-secondary)] space-y-2 flex-1 list-disc list-inside">
+                        {(d.bullets || []).slice(0, 8).map((b, idx) => (
+                          <li key={idx}>
+                            <BoldInline text={b} />
+                          </li>
+                        ))}
+                      </ul>
+                      {d.themes_ranked && d.themes_ranked.length > 0 && (
+                        <div className="mt-3 pt-3 border-t border-[var(--ai-border)] text-[10px] text-[var(--ai-muted)]">
+                          <p className="font-medium text-[var(--ai-text-secondary)] mb-1">Lead examples</p>
+                          {d.themes_ranked.slice(0, 4).map((tr) => {
+                            const lt = tr.lead_example?.title?.trim() || "";
+                            const short = lt.length > 56 ? `${lt.slice(0, 56)}…` : lt;
+                            return (
+                              <div key={tr.theme_id} className="mb-2">
+                                <span className="text-[var(--ai-text)]">{tr.label}</span>
+                                {tr.lead_example?.url && (
+                                  <>
+                                    {" "}
+                                    <a
+                                      href={tr.lead_example.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-[var(--ai-accent)] hover:underline break-all"
+                                      title={lt || undefined}
+                                    >
+                                      {short || "Open example"}
+                                    </a>
+                                    <span className="text-[var(--ai-muted)]"> · {tr.lead_example.forum_site}</span>
+                                  </>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {d.example_threads && d.example_threads.length > 0 && (
+                        <ul className="mt-3 pt-3 border-t border-[var(--ai-border)] text-[10px] space-y-1.5">
+                          {d.example_threads.slice(0, 6).map((ex, idx) => (
+                            <li key={idx} className="text-[var(--ai-text-secondary)]">
+                              {ex.url ? (
+                                <a
+                                  href={ex.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-[var(--ai-accent)] hover:underline break-all"
+                                >
+                                  {ex.title?.trim() || ex.theme_label || "Open thread"}
+                                </a>
+                              ) : (
+                                <span>{ex.theme_label}</span>
+                              )}
+                              {ex.forum_site ? (
+                                <span className="text-[var(--ai-muted)]"> · {ex.forum_site}</span>
+                              ) : null}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--ai-muted)] mb-3">
+                Theme detail by surface
+              </h3>
+              <div className="space-y-6">
+                {(themeDigest.sections || []).map((sec) => (
+                  <div key={sec.forum_site}>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--ai-accent)] mb-2">
+                      {sec.forum_site}
+                    </h3>
+                    <div className="space-y-4">
+                      {(sec.themes || []).slice(0, 12).map((th) => (
+                        <div
+                          key={th.theme_id}
+                          className="rounded-lg border border-[var(--ai-border)] bg-[var(--ai-surface)] p-3"
+                        >
+                          <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
+                            <span className="text-sm font-medium text-[var(--ai-text)]">{th.label}</span>
+                            <span className="text-xs text-[var(--ai-muted)] tabular-nums">
+                              {th.thread_count} threads · score {th.keyword_hit_score}
+                            </span>
+                          </div>
+                          {th.description && (
+                            <p className="text-xs text-[var(--ai-text-secondary)] mb-2">{th.description}</p>
+                          )}
+                          <ul className="space-y-1.5 text-xs">
+                            {(th.sample_threads || []).map((t, j) => (
+                              <li key={j}>
+                                <a
+                                  href={t.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-[var(--ai-accent)] hover:underline break-all"
+                                >
+                                  {t.title}
+                                </a>
+                                <span className="text-[var(--ai-muted)] ml-1">({t.strength})</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {(themeDigest.sections || []).length === 0 && (
+                <p className="text-xs text-[var(--ai-muted)] mt-4">
+                  No per-surface theme rows yet — PR pack above may still reflect sparse data. Run ingestion and refresh.
+                </p>
+              )}
+            </>
+          )}
+        </section>
 
         <div className="flex flex-wrap items-center gap-4 mb-6">
           <label className="flex items-center gap-2 text-sm text-[var(--ai-text-secondary)]">

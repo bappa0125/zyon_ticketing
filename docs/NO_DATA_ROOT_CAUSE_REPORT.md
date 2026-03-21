@@ -366,7 +366,7 @@ This document maps each UI page (and its API) to the data it expects, the root c
 
 ---
 
-## 19. Reports (P&R) (`/reports`)
+## 19. Reports (P&R) (`/reports/pr`; `/reports` redirects)
 
 | Aspect | Detail |
 |--------|--------|

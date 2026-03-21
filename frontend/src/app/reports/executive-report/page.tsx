@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useEffect, useCallback } from "react";
 import { getApiBase } from "@/lib/api";
 
@@ -279,7 +280,10 @@ export default function ExecutiveReportPage() {
           <div>
             <h1 className="text-2xl font-semibold text-[var(--ai-text)]">Executive Competitor Intelligence</h1>
             <p className="text-sm text-[var(--ai-muted)] mt-1">
-              Unified view: Reputation • Media Intel • Coverage • PR Opportunities • PR Intelligence • Narrative • AI Search Visibility • Positioning Mix (forum vs news, topics, gaps).
+              Unified view: Reputation • Media Intel • Coverage • PR Opportunities • PR Intelligence • Narrative • AI Search Visibility • Positioning Mix (forum vs news, topics, gaps).{" "}
+              <Link href="/reports/narrative-briefing" className="text-[var(--ai-accent)] hover:underline font-medium whitespace-nowrap">
+                Open narrative briefing →
+              </Link>
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">

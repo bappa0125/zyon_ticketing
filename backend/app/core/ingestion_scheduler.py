@@ -262,6 +262,39 @@ def _job_narrative_positioning():
         logger.exception("scheduler_job_failed", job="narrative_positioning", error=str(e))
 
 
+def _job_narrative_briefing_daily():
+    """Scheduled job: CXO narrative briefing packs per client → Mongo (LLM memo ingested, not user-triggered)."""
+    if _skip_if_backfill("narrative_briefing_daily"):
+        return
+    nb_cfg = get_config().get("narrative_briefing")
+    if not isinstance(nb_cfg, dict) or not nb_cfg.get("enabled", True):
+        return
+    from app.services.narrative_briefing_service import run_narrative_briefing_for_all_clients
+    logger.info("scheduler_job_start", job="narrative_briefing_daily")
+    try:
+        result = asyncio.run(run_narrative_briefing_for_all_clients())
+        logger.info("scheduler_job_complete", job="narrative_briefing_daily", result=result)
+    except Exception as e:
+        logger.exception("scheduler_job_failed", job="narrative_briefing_daily", error=str(e))
+
+
+def _job_forum_theme_digest():
+    """Forum theme digest: Indian forums + optional Reddit → forum_theme_digest (+ PR deliverables)."""
+    if _skip_if_backfill("forum_theme_digest"):
+        return
+    ftd = get_config().get("forum_theme_digest")
+    if not isinstance(ftd, dict) or not ftd.get("enabled", True):
+        return
+    from app.services.forum_theme_digest_service import run_forum_theme_digest_job
+
+    logger.info("scheduler_job_start", job="forum_theme_digest")
+    try:
+        result = asyncio.run(run_forum_theme_digest_job())
+        logger.info("scheduler_job_complete", job="forum_theme_digest", result=result)
+    except Exception as e:
+        logger.exception("scheduler_job_failed", job="forum_theme_digest", error=str(e))
+
+
 def _job_narrative_intelligence_daily():
     """Scheduled job: 1 LLM synthesis over narrative shift + Reddit + YouTube → store daily."""
     if _skip_if_backfill("narrative_intelligence_daily"):
@@ -440,6 +473,18 @@ def start_scheduler():
             _scheduler.add_job(_job_narrative_positioning, "cron", hour=9, minute=30, id="narrative_positioning")
         except Exception as e:
             logger.warning("narrative_positioning job not scheduled", error=str(e))
+    nb_cfg = cfg.get("narrative_briefing")
+    if isinstance(nb_cfg, dict) and nb_cfg.get("enabled", True):
+        try:
+            _scheduler.add_job(_job_narrative_briefing_daily, "cron", hour=10, minute=15, id="narrative_briefing_daily")
+        except Exception as e:
+            logger.warning("narrative_briefing_daily job not scheduled", error=str(e))
+    ftd_cfg = cfg.get("forum_theme_digest")
+    if isinstance(ftd_cfg, dict) and ftd_cfg.get("enabled", True):
+        try:
+            _scheduler.add_job(_job_forum_theme_digest, "cron", hour=10, minute=45, id="forum_theme_digest_daily")
+        except Exception as e:
+            logger.warning("forum_theme_digest_daily job not scheduled", error=str(e))
     try:
         _scheduler.add_job(_job_coverage_pr_summary, "cron", hour=10, minute=0, id="coverage_pr_summary_daily")
     except Exception as e:

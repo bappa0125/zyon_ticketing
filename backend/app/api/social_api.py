@@ -219,16 +219,19 @@ async def refresh_ai_search_visibility():
 @router.get("/social/forum-mentions")
 async def get_forum_mentions(
     entity: Optional[str] = None,
+    client: Optional[str] = None,
     limit: int = 50,
     range_days: int = 14,
 ):
     """
     Return entity_mentions where type=forum (traderji, tradingqna, valuepickr, etc.).
-    Optional ?entity= to filter by brand/competitor name.
+    Optional ?entity= for one brand/competitor, or ?client=Sahi to include Sahi + all competitors from clients.yaml.
+    If both are set, ?entity= wins.
     """
     from datetime import datetime, timedelta, timezone
 
     await get_mongo_client()
+    from app.core.client_config_loader import get_entity_names, load_clients
     from app.services.mongodb import get_db
 
     db = get_db()
@@ -243,6 +246,16 @@ async def get_forum_mentions(
     }
     if entity and entity.strip():
         query["entity"] = entity.strip()
+    elif client and client.strip():
+        clients_list = await load_clients()
+        client_obj = next(
+            (c for c in clients_list if (c.get("name") or "").strip().lower() == client.strip().lower()),
+            None,
+        )
+        if client_obj:
+            names = get_entity_names(client_obj)
+            if names:
+                query["entity"] = {"$in": names}
     cursor = coll.find(query).sort("published_at", -1).limit(min(limit, 200))
     mentions = []
     async for doc in cursor:
@@ -256,6 +269,12 @@ async def get_forum_mentions(
             "url": doc.get("url", ""),
             "published_at": pub_str,
             "sentiment": doc.get("sentiment"),
+            "narrative_tags": doc.get("narrative_tags") or [],
+            "narrative_primary": doc.get("narrative_primary"),
+            "narrative_surface": doc.get("narrative_surface"),
+            "narrative_role": doc.get("narrative_role"),
+            "forum_site": doc.get("forum_site"),
+            "feed_domain": doc.get("feed_domain"),
         })
     return {"mentions": mentions, "count": len(mentions)}
 
@@ -273,6 +292,122 @@ async def get_forum_topics_traction(
     from app.services.forum_traction_service import get_forum_topics_traction as _get
     await get_mongo_client()
     return await _get(client=client or None, range_days=min(range_days, 90), top_n=min(top_n, 50))
+
+
+@router.get("/social/forum-theme-digest")
+async def get_forum_theme_digest(
+    days: int = 7,
+    live: bool = False,
+):
+    """
+    Latest stored **forum theme digest**: unbranded discourse themes (IPO, F&O, MF, etc.)
+    from Indian forum `article_documents` plus optional Reddit `social_posts`, scored with
+    `narrative_taxonomy.yaml`. Includes a deterministic **3-part PR pack** (discourse map,
+    risk/FAQ hooks, content/spokesperson angles). Config: `forum_theme_digest`.
+
+    Set `live=true` to recompute on demand (can be slow); default reads last saved snapshot.
+    """
+    from app.services.forum_theme_digest_service import (
+        build_forum_theme_digest,
+        load_latest_forum_theme_digest,
+        save_forum_theme_digest,
+    )
+
+    await get_mongo_client()
+    days = min(max(days, 1), 90)
+    if live:
+        doc = await build_forum_theme_digest(range_days=days)
+        await save_forum_theme_digest(doc)
+        return {"digest": doc, "source": "live"}
+    cached = await load_latest_forum_theme_digest(range_days=days)
+    if cached:
+        return {"digest": cached, "source": "cached"}
+    doc = await build_forum_theme_digest(range_days=days)
+    await save_forum_theme_digest(doc)
+    return {"digest": doc, "source": "computed_first_run"}
+
+
+@router.post("/social/forum-theme-digest/refresh")
+async def refresh_forum_theme_digest():
+    """Run forum theme digest job (same as scheduler). Respects forum_theme_digest.enabled."""
+    from app.services.forum_theme_digest_service import run_forum_theme_digest_job
+
+    await get_mongo_client()
+    result = await run_forum_theme_digest_job()
+    if not result.get("ok"):
+        raise HTTPException(status_code=403, detail=result.get("reason", "disabled"))
+    return result
+
+
+@router.get("/social/forum-mentions/narrative-tags")
+async def get_forum_narrative_tags_traction(
+    client: Optional[str] = None,
+    range_days: int = 14,
+    top_n: int = 40,
+):
+    """
+    Narrative taxonomy traction on forum surfaces (TradingQnA, ValuePickr, Hacker News, Traderji).
+    Groups by narrative tag + forum_site for amplifier / gap analysis.
+    """
+    from app.services.forum_traction_service import get_forum_narrative_tag_traction as _get
+    await get_mongo_client()
+    return await _get(client=client or None, range_days=min(range_days, 90), top_n=min(top_n, 100))
+
+
+@router.get("/social/narrative-landscape")
+async def get_narrative_landscape(
+    client: Optional[str] = None,
+    range_days: int = 30,
+    top_tags: int = 15,
+):
+    """
+    CXO view: per narrative tag — publication vs forum volume, earliest signals, entity share,
+    gap type (absent / underindexed / competitive / strong), and template CXO moves.
+    """
+    from app.services.narrative_landscape_service import get_narrative_landscape as _get
+
+    await get_mongo_client()
+    return await _get(
+        client=client or None,
+        range_days=min(range_days, 90),
+        top_tags=min(max(top_tags, 1), 40),
+    )
+
+
+@router.get("/social/narrative-briefing-pack")
+async def get_narrative_briefing_pack(
+    client: Optional[str] = None,
+    range_days: int = 30,
+):
+    """
+    Latest stored CXO briefing pack from Mongo (written by daily ingestion / master backfill).
+    Does not call the LLM — prevents user-triggered token use.
+    """
+    from app.services.narrative_briefing_service import get_narrative_briefing_pack_for_api as _get
+
+    await get_mongo_client()
+    return await _get(client=client or None, range_days=min(range_days, 90))
+
+
+@router.get("/social/narrative-briefing-trends")
+async def get_narrative_briefing_trends(
+    client: Optional[str] = None,
+    days: int = 7,
+    timezone: Optional[str] = None,
+):
+    """
+    Daily entity_mention counts (publication vs forum) for client universe — sparkline / trend UI.
+    Optional IANA `timezone` (e.g. Asia/Kolkata) overrides `report_timezone` from clients.yaml.
+    """
+    from app.services.narrative_briefing_service import get_mention_trends_for_client as _trends
+
+    await get_mongo_client()
+    tz_q = (timezone or "").strip() or None
+    return await _trends(
+        client=client or None,
+        days=min(max(days, 1), 30),
+        timezone_override=tz_q,
+    )
 
 
 @router.get("/social/sahi-strategic-brief")

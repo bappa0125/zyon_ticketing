@@ -231,6 +231,26 @@ narrative_positioning:
   llm:
     model: openrouter/free
 
+# CXO narrative briefing — 1 LLM memo per client per day, stored in narrative_briefing_snapshots (no user-triggered LLM).
+narrative_briefing:
+  enabled: true
+  range_days: 30
+
+# Forum theme digest — Indian forums (article_documents) + Reddit (social_posts, same taxonomy).
+# Keyword themes from narrative_taxonomy.yaml; no brand entity required for theme scoring.
+forum_theme_digest:
+  enabled: true
+  range_days: 7
+  max_documents: 2500
+  max_reddit_posts: 2000
+  include_reddit: true
+  top_threads_per_theme: 6
+  min_text_len: 40
+  forum_sites:
+    - valuepickr
+    - tradingqna
+    - traderji
+
 # AI Search Narrative — track what AI search (e.g. Perplexity) returns for fixed queries.
 # Feeds Narrative Analytics / positioning. Rate-limited for free tier.
 ai_search_narrative:

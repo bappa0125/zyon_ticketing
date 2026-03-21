@@ -1,10 +1,19 @@
 """Entity mentions pipeline — article_documents → entity detection → entity_mentions.
 Reads article_documents (preferring unprocessed), detects entities, validates context,
-stores entity_mentions and marks doc as processed so backlog is drained without re-processing."""
+stores entity_mentions and marks doc as processed so backlog is drained without re-processing.
+
+Forum detection: page domain (TradingQnA, ValuePickr, Traderji) OR rss feed_domain
+(e.g. news.ycombinator.com for Hacker News items whose article host is external).
+Narrative tags: config/narrative_taxonomy.yaml (rule-based) for positioning / gap analytics."""
 from datetime import datetime, timezone
 
 from app.core.logging import get_logger
 from app.services.mongodb import get_mongo_client, get_db
+from app.services.narrative_tagging_service import (
+    forum_site_key,
+    is_forum_document,
+    tag_text_for_narratives,
+)
 
 logger = get_logger(__name__)
 
@@ -12,12 +21,6 @@ COLLECTION_ARTICLE_DOCUMENTS = "article_documents"
 COLLECTION_ENTITY_MENTIONS = "entity_mentions"
 # Larger default so each run processes more; unprocessed-first query drains backlog
 BATCH_SIZE = 150
-# Docs from these domains get type=forum (thread-level when from RSS; listing page when from HTML)
-_FORUM_DOMAINS = {
-    "tradingqna.com",
-    "traderji.com",
-    "valuepickr.com",
-}
 
 
 async def run_entity_mentions_pipeline(batch_size: int = BATCH_SIZE, newest_first: bool = False) -> dict[str, int]:
@@ -74,6 +77,7 @@ async def run_entity_mentions_pipeline(batch_size: int = BATCH_SIZE, newest_firs
             url = doc.get("url") or doc.get("url_resolved") or ""
             title = (doc.get("title") or "")[:500]
             source_domain = (doc.get("source_domain") or "")[:200]
+            feed_domain = (doc.get("feed_domain") or "").strip().lower()[:200]
             published_at = doc.get("published_at") or doc.get("fetched_at")
             article_text = (doc.get("article_text") or "")[:DETECTION_WINDOW]
             rss_summary = (doc.get("summary") or "").strip()[:2000]
@@ -113,7 +117,12 @@ async def run_entity_mentions_pipeline(batch_size: int = BATCH_SIZE, newest_firs
             else:
                 summary = (rss_summary or title or "")[:500].strip()
             sd = (source_domain or "").strip().lower()
-            mention_type = "forum" if sd in _FORUM_DOMAINS else "article"
+            is_forum = is_forum_document(sd, feed_domain)
+            mention_type = "forum" if is_forum else "article"
+            narrative_tags, narrative_primary = tag_text_for_narratives(validation_text)
+            fsite = forum_site_key(sd, feed_domain) if is_forum else None
+            narrative_surface = "forum" if is_forum else "article"
+            narrative_role = "amplifier" if is_forum else "publication"
 
             for entity in entities_found:
                 if not validate_mention_context(entity, validation_text, source_domain):
@@ -143,6 +152,12 @@ async def run_entity_mentions_pipeline(batch_size: int = BATCH_SIZE, newest_firs
                     "url": url[:2000],
                     "type": mention_type,
                     "content_quality": content_quality,
+                    "narrative_tags": narrative_tags,
+                    "narrative_primary": narrative_primary,
+                    "narrative_surface": narrative_surface,
+                    "narrative_role": narrative_role,
+                    "forum_site": fsite,
+                    "feed_domain": feed_domain or None,
                 }
                 author = (doc.get("author") or "").strip()[:300] if isinstance(doc.get("author"), str) else ""
                 if author:

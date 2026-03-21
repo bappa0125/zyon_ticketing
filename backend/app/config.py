@@ -78,6 +78,8 @@ def get_config() -> dict[str, Any]:
         "narrative_shift": base.get("narrative_shift") if isinstance(base.get("narrative_shift"), dict) else {},
         "narrative_intelligence_daily": base.get("narrative_intelligence_daily") if isinstance(base.get("narrative_intelligence_daily"), dict) else {},
         "narrative_positioning": base.get("narrative_positioning") if isinstance(base.get("narrative_positioning"), dict) else {},
+        "narrative_briefing": base.get("narrative_briefing") if isinstance(base.get("narrative_briefing"), dict) else {},
+        "forum_theme_digest": base.get("forum_theme_digest") if isinstance(base.get("forum_theme_digest"), dict) else {},
         "ai_search_narrative": base.get("ai_search_narrative") if isinstance(base.get("ai_search_narrative"), dict) else {},
         "ai_search_visibility": base.get("ai_search_visibility") if isinstance(base.get("ai_search_visibility"), dict) else {},
         "executive_competitor_analysis": base.get("executive_competitor_analysis") if isinstance(base.get("executive_competitor_analysis"), dict) else {},

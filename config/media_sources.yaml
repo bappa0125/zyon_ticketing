@@ -272,6 +272,18 @@ sources:
     priority: 2
     weight: 7
 
+  # Hacker News front page — links are often external; feed_domain preserved on article_documents
+  # for forum-style narrative tagging (entity_mentions type=forum when feed_domain matches).
+  - domain: news.ycombinator.com
+    name: Hacker News
+    category: forum
+    region: global
+    crawl_method: rss
+    rss_feed: https://news.ycombinator.com/rss
+    crawl_frequency: 120
+    priority: 2
+    weight: 6
+
 
   # ------------------------------------------------
   # MARKET ANALYSIS BLOGS

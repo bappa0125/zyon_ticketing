@@ -57,6 +57,148 @@ _TYPE_LABELS = {
 _FORUM_SOCIAL_TYPES = frozenset(("forum", "reddit", "youtube", "twitter"))
 
 
+async def _resolve_client_config_for_entity(ent: str) -> tuple[str | None, str]:
+    """
+    If `ent` matches a configured client name or any of its monitored entity names,
+    return (primary client name from YAML, display name). Else (None, ent).
+    """
+    from app.core.client_config_loader import get_entity_names, load_clients
+
+    raw = (ent or "").strip()
+    if not raw:
+        return None, raw
+    clients = await load_clients()
+    rl = raw.lower()
+    for c in clients:
+        cn = (c.get("name") or "").strip()
+        if not cn:
+            continue
+        if cn.lower() == rl:
+            return cn, raw
+        for name in get_entity_names(c):
+            if not name:
+                continue
+            if name.lower() == rl or name == raw:
+                return cn, raw
+    return None, raw
+
+
+async def _format_db_hint_coverage(entity_extracted: str) -> str:
+    from app.services.coverage_service import compute_coverage
+
+    client_name, display = await _resolve_client_config_for_entity(entity_extracted)
+    target = client_name or display.strip()
+    rows = await compute_coverage(target)
+    if not rows:
+        return (
+            f"No competitor coverage data in the database for **{target}**. "
+            "Check that this name matches a client in `clients.yaml` and that "
+            "`entity_mentions` / `article_documents` have been populated.\n"
+        )
+    lines = [
+        f"**Competitor coverage** (from database: `entity_mentions` + `article_documents`) for **{target}**:\n",
+    ]
+    for r in rows:
+        n = int(r.get("mentions") or 0)
+        name = str(r.get("entity") or "")
+        lines.append(f"- **{name}**: {n:,} mentions\n")
+    lines.append("\n_Counts combine tagged rows in `entity_mentions` plus articles whose `entities` array includes each name._\n")
+    return "".join(lines)
+
+
+async def _format_db_hint_narrative(entity_extracted: str) -> str:
+    from app.services.narrative_positioning_service import load_positioning
+
+    client_name, display = await _resolve_client_config_for_entity(entity_extracted)
+    target = client_name or display.strip()
+    reports = await load_positioning(target, days=7)
+    if not reports:
+        return (
+            f"No narrative positioning reports in the database for **{target}** yet. "
+            "Run the narrative positioning batch (`narrative_positioning` job) or open "
+            "[Narrative Positioning](/social/narrative-intelligence).\n"
+        )
+    rep = reports[0]
+    date = rep.get("date") or ""
+    lines = [
+        f"**Narrative positioning** (from database: `narrative_positioning`) for **{target}**",
+        f" — latest report **{date}**:\n\n",
+    ]
+    brief = (rep.get("brief_summary") or "").strip()
+    if brief:
+        lines.append(brief[:3500])
+        lines.append("\n\n")
+    pos = rep.get("positioning") or {}
+    if isinstance(pos, dict):
+        if pos.get("headline"):
+            lines.append(f"**Positioning headline:** {pos.get('headline')}\n\n")
+        if pos.get("pitch_angle"):
+            lines.append(f"**Pitch angle:** {pos.get('pitch_angle')[:800]}\n\n")
+    mix = (rep.get("positioning_mix_summary") or "").strip()
+    if mix:
+        lines.append(f"**Mix / evidence:** {mix[:1200]}\n\n")
+    threats = rep.get("threats") or []
+    if isinstance(threats, list) and threats:
+        lines.append("**Threats / risks:**\n")
+        for t in threats[:5]:
+            if isinstance(t, dict):
+                lines.append(f"- {t.get('narrative', '')[:280]}\n")
+        lines.append("\n")
+    opps = rep.get("opportunities") or []
+    if isinstance(opps, list) and opps:
+        lines.append("**Opportunities:**\n")
+        for o in opps[:5]:
+            if isinstance(o, dict):
+                lines.append(f"- {o.get('angle', '')[:280]}\n")
+        lines.append("\n")
+    return "".join(lines)
+
+
+async def _format_db_hint_sentiment(entity_extracted: str) -> str:
+    from app.services.mongodb import get_mongo_client, get_db
+
+    ent = (entity_extracted or "").strip()
+    try:
+        from app.services.mention_context_validation import resolve_to_canonical_entity
+        ent = resolve_to_canonical_entity(ent) or ent
+    except Exception:
+        pass
+    await get_mongo_client()
+    coll = get_db()["entity_mentions"]
+    pipeline = [
+        {"$match": {"entity": ent, "sentiment": {"$exists": True, "$nin": [None, ""]}}},
+        {
+            "$group": {
+                "_id": "$sentiment",
+                "n": {"$sum": 1},
+            }
+        },
+    ]
+    counts: dict[str, int] = {}
+    async for doc in coll.aggregate(pipeline):
+        k = str(doc.get("_id") or "").strip().lower()
+        if k:
+            counts[k] = int(doc.get("n") or 0)
+    total = sum(counts.values())
+    if total == 0:
+        return (
+            f"No sentiment-labelled mentions in the database for **{ent}** yet. "
+            "Sentiment is stored on `entity_mentions` after the sentiment pipeline runs.\n"
+        )
+    pos = counts.get("positive", 0)
+    neu = counts.get("neutral", 0)
+    neg = counts.get("negative", 0)
+    lines = [
+        f"**Sentiment** (from database: `entity_mentions` with `sentiment` field) for **{ent}**:\n\n",
+        f"- **Positive:** {pos:,}\n",
+        f"- **Neutral:** {neu:,}\n",
+        f"- **Negative:** {neg:,}\n",
+        f"- **Total labelled:** {total:,}\n\n",
+        "_These are monitoring-tagged rows only, not a full open-web sample._\n",
+    ]
+    return "".join(lines)
+
+
 def _hint_type_to_link(hint_type: str | None) -> str:
     """Return a 'For more: [Page](path)' line for suggested-question deep link. None if unknown."""
     if not hint_type or not isinstance(hint_type, str):
@@ -280,6 +422,7 @@ async def chat_stream(conversation_id: str, user_message: str, live_search: bool
     from app.services.url_discovery.intent_detector import (
         extract_company_from_text,
         extract_company_or_topic,
+        extract_monitored_query_entity,
         extract_search_query,
         is_follow_up_request,
         is_recall_questions_request,
@@ -365,7 +508,11 @@ async def chat_stream(conversation_id: str, user_message: str, live_search: bool
         if company is None and is_follow_up_request(user_message):
             for m in last_messages:
                 if m.get("role") == "user" and m.get("content") != user_message:
-                    company = extract_company_or_topic(m["content"]) or extract_company_from_text(m["content"])
+                    company = (
+                        extract_company_or_topic(m["content"])
+                        or extract_monitored_query_entity(m["content"])
+                        or extract_company_from_text(m["content"])
+                    )
                     if company:
                         break
 
@@ -383,8 +530,10 @@ async def chat_stream(conversation_id: str, user_message: str, live_search: bool
 
         # Out of scope: not greeting, not recall, not follow-up, and not article/mention search
         # -> immediately show suggested prompts, no search, no LLM
+        # db_only hint path must never hit this (always in-scope or handled below).
         if (
-            not is_greeting_or_casual(user_message)
+            not db_only
+            and not is_greeting_or_casual(user_message)
             and not is_recall_questions_request(user_message)
             and not is_follow_up_request(user_message)
             and not is_in_scope_for_search(user_message)
@@ -403,6 +552,53 @@ async def chat_stream(conversation_id: str, user_message: str, live_search: bool
                     except Exception as e:
                         logger.warning("chat_store_after_stream_failed", error=str(e))
                 asyncio.create_task(_store_out_of_scope())
+            return
+
+        # Suggestion chips: coverage / narrative / sentiment → read dedicated collections (not generic mention list)
+        if db_only and hint_type and hint_type.strip().lower() in ("coverage", "narrative", "sentiment"):
+            ht = hint_type.strip().lower()
+            ent_raw = extract_monitored_query_entity(user_message) or mention_entity or company or search_query
+            if not ent_raw:
+                fail = (
+                    "I couldn't determine which company you mean. "
+                    "Try a suggestion chip above or ask using the client name (e.g. **Sentiment for Sahi**).\n"
+                )
+                yield fail
+                full_response.append(fail)
+            else:
+                try:
+                    from app.services.mention_context_validation import resolve_to_canonical_entity
+
+                    ent_resolved = resolve_to_canonical_entity(ent_raw) or ent_raw
+                except Exception:
+                    ent_resolved = ent_raw
+                line = _step_event("DB hint answer", f"type={ht}, entity={ent_resolved}")
+                if line:
+                    yield line
+                if ht == "coverage":
+                    body = await _format_db_hint_coverage(ent_resolved)
+                elif ht == "narrative":
+                    body = await _format_db_hint_narrative(ent_resolved)
+                else:
+                    body = await _format_db_hint_sentiment(ent_resolved)
+                yield body
+                full_response.append(body)
+            link_line = _hint_type_to_link(ht)
+            if link_line:
+                yield link_line
+                full_response.append(link_line)
+            response_text = "".join(full_response)
+            if user_msg_id is not None:
+
+                async def _store_hint_response():
+                    try:
+                        aid = await db.add_message(conversation_id, "assistant", response_text)
+                        await asyncio.to_thread(qdrant.upsert_message, conversation_id, user_msg_id, "user", user_message)
+                        await asyncio.to_thread(qdrant.upsert_message, conversation_id, aid, "assistant", response_text)
+                    except Exception as e:
+                        logger.warning("chat_store_hint_failed", error=str(e))
+
+                asyncio.create_task(_store_hint_response())
             return
 
         # Gate: only run search when intent is search (or follow-up with company from context), or when db_only suggested-question
@@ -435,10 +631,16 @@ async def chat_stream(conversation_id: str, user_message: str, live_search: bool
             yield status1
             full_response.append(status1)
             vector_task = asyncio.create_task(asyncio.to_thread(qdrant.search_similar, conversation_id, user_message, 5))
-            line = _step_event("Searching mentions", "DB + live search (RSS, articles, Reddit, YouTube, Twitter)")
+            line = _step_event(
+                "Searching mentions",
+                "Database only (monitored sources)" if db_only else "DB + live search (RSS, articles, Reddit, YouTube, Twitter)",
+            )
             if line:
                 yield line
-            status2 = f"Searching RSS feeds, articles, Reddit, YouTube, and Twitter for **{search_query or mention_entity}**...\n\n"
+            if db_only:
+                status2 = f"Loading mentions for **{search_query or mention_entity}** from the database (monitored articles, forums, social)…\n\n"
+            else:
+                status2 = f"Searching RSS feeds, articles, Reddit, YouTube, and Twitter for **{search_query or mention_entity}**...\n\n"
             yield status2
             full_response.append(status2)
 

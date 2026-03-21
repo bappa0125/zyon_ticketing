@@ -113,8 +113,8 @@ def extract_search_query(message: str) -> str | None:
         return None
     if is_greeting_or_casual(msg):
         return None
-    # 1. Use regex entity extraction when patterns match
-    entity = extract_company_or_topic(msg)
+    # 1. Regex / hint-style phrases (includes everything extract_company_or_topic covers + chip phrases)
+    entity = extract_monitored_query_entity(msg)
     if entity:
         return entity
     # 2. For substantive messages, use cleaned message as search query (always run search)
@@ -218,6 +218,58 @@ SUGGESTED_PROMPTS = [
 ]
 
 
+def extract_monitored_query_entity(message: str) -> str | None:
+    """
+    Extract company/entity for monitored-source questions (UI hint chips and similar phrasing).
+    Used so chat stays in-scope and can answer from DB when patterns like
+    'Competitor coverage for Sahi' don't match TRIGGER_PATTERNS.
+    """
+    msg = message.strip()
+    if len(msg) < 3 or is_greeting_or_casual(msg):
+        return None
+    e = extract_company_or_topic(msg)
+    if e:
+        return _strip_entity_noise(e)
+
+    patterns = [
+        r"(?:latest|recent|top)\s+articles?\s+about\s+(.+)$",
+        r"recent\s+mentions?\s+of\s+(.+)$",
+        r"find\s+articles?\s+about\s+(.+)$",
+        r"competitor\s+coverage\s+for\s+(.+)$",
+        r"narrative\s+positioning\s+for\s+(.+)$",
+        r"sentiment\s+for\s+(.+)$",
+    ]
+    for pat in patterns:
+        m = re.search(pat, msg, re.I)
+        if m:
+            raw = m.group(1).strip().rstrip(".!?").strip()
+            if len(raw) < 2:
+                continue
+            try:
+                from app.services.entity_detection_service import detect_entity
+                canonical = detect_entity(raw)
+                if canonical:
+                    return canonical
+            except Exception:
+                pass
+            return raw
+    return None
+
+
+def _strip_entity_noise(entity: str) -> str:
+    """Trim trailing junk; if string still looks like a full sentence, try to pull last capitalized token."""
+    s = entity.strip().rstrip(".!?").strip()
+    if len(s) < 80:
+        return s
+    # e.g. broken extraction — take last 2–4 word phrase as name
+    parts = s.split()
+    if len(parts) >= 2:
+        tail = " ".join(parts[-3:])
+        if 2 <= len(tail) <= 60:
+            return tail
+    return s[:80]
+
+
 def get_out_of_scope_message() -> str:
     """Return message telling user what phrases to ask. No search, no LLM."""
     lines = [
@@ -234,13 +286,14 @@ def get_out_of_scope_message() -> str:
 
 def is_in_scope_for_search(message: str) -> bool:
     """
-    True ONLY when message clearly asks for articles/mentions about a company.
+    True when message clearly asks for articles/mentions/coverage/narrative/sentiment about a monitored company.
     Random questions, greetings, general knowledge -> False. No search.
     """
     if is_greeting_or_casual(message):
         return False
-    company = extract_company_or_topic(message)
-    return company is not None
+    if extract_company_or_topic(message):
+        return True
+    return extract_monitored_query_entity(message) is not None
 
 
 def is_recall_questions_request(message: str) -> bool:
@@ -268,6 +321,17 @@ def _extract_entity(message: str) -> str:
     quoted = re.findall(r'"([^"]+)"', message)
     if quoted:
         return quoted[0].strip()
+
+    # "latest/recent/top articles about X" (hint chips use this phrasing)
+    about_latest = re.search(
+        r"\b(?:latest|recent|top)\s+(?:articles?|news|mentions?)\s+about\s+([^.?!]+?)(?:\s*$|\.)",
+        message,
+        re.I,
+    )
+    if about_latest:
+        entity = about_latest.group(1).strip()
+        if len(entity) > 2 and len(entity) < 100:
+            return entity
 
     # "articles about X" / "top articles about X" / "news about X" -> extract X
     about_match = re.search(

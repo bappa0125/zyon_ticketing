@@ -163,3 +163,20 @@ narrative_positioning:
   enabled: true
   llm:
     model: openrouter/free
+
+narrative_briefing:
+  enabled: true
+  range_days: 30
+
+forum_theme_digest:
+  enabled: true
+  range_days: 7
+  max_documents: 2500
+  max_reddit_posts: 2000
+  include_reddit: true
+  top_threads_per_theme: 6
+  min_text_len: 40
+  forum_sites:
+    - valuepickr
+    - tradingqna
+    - traderji

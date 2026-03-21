@@ -412,15 +412,70 @@ export const PAGE_HELP: Record<string, PageHelp> = {
   },
 
   "/opportunities": {
-    title: "Opportunities",
-    summary: "Actionable opportunities from media and social signals.",
+    title: "PR Opportunities",
+    summary:
+      "Topic gaps (where competitors have coverage and the client does not), plus three LLM-assisted tabs: quote opportunities, outreach drafts, and competitor response angles. All depend on recent media ingestion and correct client entity names.",
     sections: [
       {
-        sectionTitle: "Opportunities",
-        whatItIs: <p className={p}>Surfaces opportunities from signals.</p>,
+        sectionTitle: "Topic gaps",
+        whatItIs: (
+          <p className={p}>
+            Lists topics where competitors have mentions in the window but your selected client does not — useful for editorial and pitching strategy.
+          </p>
+        ),
+        controls: [
+          { name: "Client", howToUse: "Pick the brand; the table refreshes for that client’s entity set from config." },
+        ],
         prAgencyUse: (
           <p className={p + " " + muted}>
-            Use with Targets to prioritise outlets where opportunities cluster.
+            Use with <strong className={strong}>Targets</strong> to prioritise outlets. Pair with Media Intel when validating why a gap exists.
+          </p>
+        ),
+      },
+      {
+        sectionTitle: "Quote opportunities (often empty — by design)",
+        whatItIs: (
+          <p className={p}>
+            Not general “good stories.” The backend only flags <strong className={strong}>article_documents</strong> from the{" "}
+            <strong className={strong}>last 7 days</strong> that (1) include your client in the <code className="text-xs">entities</code> array and (2) contain
+            specific English phrases journalists use when someone <strong className={strong}>didn’t comment</strong> — e.g. “declined to comment,” “no comment,” “we reached out,”
+            “could not be reached,” “contacted for comment.” Then an LLM adds a short suggested action.
+          </p>
+        ),
+        howToInterpret: (
+          <ul className={ul}>
+            <li>
+              <strong className={strong}>Empty tab</strong> is normal if your feed rarely runs those exact phrases or you have little 7-day coverage with full article text.
+            </li>
+            <li>
+              <strong className={strong}>Generate / Refresh</strong> must run (or the daily job) to write rows; the UI only reads what was stored.
+            </li>
+          </ul>
+        ),
+        controls: [
+          {
+            name: "Generate / Refresh",
+            howToUse:
+              "Runs the PR opportunities batch for the selected client: scans for quote phrases, builds outreach drafts, competitor angles. Use after ingestion or when data was empty.",
+          },
+        ],
+        prAgencyUse: (
+          <p className={p + " " + muted}>
+            Treat as a <strong className={strong}>narrow alert channel</strong> for “story explicitly sought comment / no response” situations — not a replacement for reading headlines. For broader narrative work, use Dashboard, Topics, or Narrative views.
+          </p>
+        ),
+      },
+      {
+        sectionTitle: "Outreach drafts & competitor responses",
+        whatItIs: (
+          <p className={p}>
+            <strong className={strong}>Outreach drafts</strong> target outlets where the client has zero coverage but competitors appear; lines are LLM-generated pitch openers.{" "}
+            <strong className={strong}>Competitor responses</strong> use recent competitor mention articles and suggest one response angle for your client.
+          </p>
+        ),
+        prAgencyUse: (
+          <p className={p + " " + muted}>
+            Edit every draft before sending; align with compliance. If outreach is empty, ensure <code className="text-xs">source_domain</code> is backfilled on mentions/articles where needed.
           </p>
         ),
       },
@@ -442,6 +497,133 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         prAgencyUse: (
           <p className={p + " " + muted}>
             Use for integrated reports (media + social) and crisis monitoring.
+          </p>
+        ),
+      },
+    ],
+  },
+
+  "/social/forums": {
+    title: "Forum mentions",
+    summary:
+      "Retail and trader conversation: an unbranded theme digest (Indian forums + optional Reddit), a three-part PR intelligence pack, brand-filtered mentions, and topic traction — all from ingested forum threads.",
+    sections: [
+      {
+        sectionTitle: "How to use this page (workflow)",
+        whatItIs: (
+          <p className={p}>
+            Work <strong className={strong}>top to bottom</strong>. First, read the <strong className={strong}>Retail discourse themes</strong> box for what retail communities are talking about <em>without</em> needing a brand name in the text. Then use <strong className={strong}>Entity filter</strong> when you care about a specific company (Zerodha, Sahi, etc.). The tables below show which topics and threads mention those brands.
+          </p>
+        ),
+        howToInterpret: (
+          <ul className={ul}>
+            <li>
+              <strong className={strong}>Theme digest + PR pack</strong> — “What is the market mood?” (IPO chatter, F&amp;O, trust, regulation, education angles). Good for weekly client decks and prep calls.
+            </li>
+            <li>
+              <strong className={strong}>Topics by traction</strong> — Which <em>named topics</em> appear most in forum mentions in the last 14 days (can follow your entity filter).
+            </li>
+            <li>
+              <strong className={strong}>Recent forum mentions</strong> — Raw rows: entity, source site, title, link. Use for verification, quotes, and escalation.
+            </li>
+            <li>
+              <strong className={strong}>By source</strong> — Quick count of mentions per domain in your current mention list (helps see if one forum dominates).
+            </li>
+          </ul>
+        ),
+        prAgencyUse: (
+          <p className={p + " " + muted}>
+            Use the top section for <strong className={strong}>retainer-style landscape briefs</strong> (“what retail is debating this week”). Use the filtered mentions for <strong className={strong}>brand-specific monitoring</strong> and stakeholder Q&amp;A. Always treat linked threads as <strong className={strong}>illustrative samples</strong>, not a census of all investors — pair with your client’s compliance process before external use.
+          </p>
+        ),
+      },
+      {
+        sectionTitle: "Retail discourse themes & PR pack (controls)",
+        whatItIs: (
+          <p className={p}>
+            This panel aggregates themes from <strong className={strong}>Indian forums</strong> (ValuePickr, TradingQnA, Traderji) and, when enabled, <strong className={strong}>Reddit</strong> posts already stored in the system. Themes come from a fixed keyword taxonomy — not from an LLM guessing headlines. The <strong className={strong}>three cards</strong> are a ready-made “PR intelligence pack”: discourse map, risk/FAQ hooks, and content/spokesperson angles.
+          </p>
+        ),
+        howToInterpret: (
+          <ul className={ul}>
+            <li>
+              <strong className={strong}>Meta line</strong> (small caps under the title) — Digest date, rolling window (e.g. last 7 days), whether data was <strong className={strong}>cached</strong> or <strong className={strong}>live</strong>, which <strong className={strong}>surfaces</strong> had data, and how many forum docs / Reddit posts were scored.
+            </li>
+            <li>
+              <strong className={strong}>Disclaimer</strong> (if shown) — Read before sharing externally; it limits statistical claims.
+            </li>
+            <li>
+              <strong className={strong}>Cover line</strong> — One-line summary of the PR pack for that window.
+            </li>
+            <li>
+              <strong className={strong}>Card 1 — Discourse map</strong> — Top themes across all surfaces; use for exec summaries and client “what are people talking about?”
+            </li>
+            <li>
+              <strong className={strong}>Card 2 — Risk &amp; FAQ hooks</strong> — Themes tied to trust, regulation, pricing, platform, support; use for Q&amp;A prep and issues monitoring (not legal advice).
+            </li>
+            <li>
+              <strong className={strong}>Card 3 — Content &amp; spokesperson angles</strong> — Education, products, and narrative hooks grounded in observed threads; use for pitches, bylines, and calendar ideas (align with compliance).
+            </li>
+            <li>
+              <strong className={strong}>Theme detail by surface</strong> — Same themes broken down per forum/Reddit so you can cite where a narrative is loudest.
+            </li>
+          </ul>
+        ),
+        controls: [
+          {
+            name: "Recompute now",
+            howToUse:
+              "Rebuilds the digest immediately using the latest stored forum and Reddit content (rolling window, usually 7 days). Can take a moment. Use when you need the freshest snapshot after new ingestion.",
+          },
+          {
+            name: "Run scheduled job",
+            howToUse:
+              "Triggers the same job the server scheduler runs (if enabled in config). Use after large backfills or when cached data is stale and you want a server-side refresh.",
+          },
+          {
+            name: "Lead examples / sample thread links",
+            howToUse:
+              "Open links to verify tone and context before paraphrasing for clients. Prefer quoting patterns, not copying text, unless rights and forum rules allow.",
+          },
+        ],
+        prAgencyUse: (
+          <p className={p + " " + muted}>
+            Drop the three cards straight into a <strong className={strong}>weekly status doc</strong>: Card 1 for the cover email, Card 2 for the issues slide, Card 3 for content/editorial. For <strong className={strong}>fast-moving meme or viral Reddit</strong> narratives, also check <strong className={strong}>Social → Reddit trending</strong> — this digest is broader and more theme-stable. If the panel says “No digest yet,” run forum (and Reddit) ingestion, then use <strong className={strong}>Run scheduled job</strong> or Recompute.
+          </p>
+        ),
+      },
+      {
+        sectionTitle: "Entity filter, mentions table & topics",
+        whatItIs: (
+          <p className={p}>
+            <strong className={strong}>Entity filter</strong> narrows <strong className={strong}>Recent forum mentions</strong> and <strong className={strong}>Topics by traction</strong> to threads where that brand (or configured alias) was detected. It does <strong className={strong}>not</strong> change the unbranded theme digest at the top — that block is intentionally market-wide.
+          </p>
+        ),
+        howToInterpret: (
+          <ul className={ul}>
+            <li>
+              <strong className={strong}>Mentions count</strong> — Number of matching rows in the last 14 days for your filter (approximate pulse for that brand on forums).
+            </li>
+            <li>
+              <strong className={strong}>Topics by traction</strong> — Aggregated topic labels with mention counts and sample titles; good for “what themes attach to our name on forums.”
+            </li>
+          </ul>
+        ),
+        controls: [
+          {
+            name: "Entity filter",
+            howToUse:
+              "Type a brand or alias (e.g. Zerodha, Sahi), then click Refresh to reload mentions and topics. Leave empty to see all forum mentions in range.",
+          },
+          {
+            name: "Refresh",
+            howToUse:
+              "Reloads the mentions list and topics table from the API using the current entity filter. Does not rebuild the theme digest — use Recompute now / Run scheduled job for that.",
+          },
+        ],
+        prAgencyUse: (
+          <p className={p + " " + muted}>
+            For <strong className={strong}>account teams</strong>: set the client name, refresh, scan Recent mentions for escalations, and use Topics by traction in the weekly call. For <strong className={strong}>new business</strong>: leave the filter empty to sample overall forum noise, then use the top PR pack for category thought leadership.
           </p>
         ),
       },

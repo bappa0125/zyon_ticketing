@@ -19,6 +19,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.core.logging import get_logger
 from app.services.mongodb import get_mongo_client, get_db
+from app.services.narrative_tagging_service import (
+    forum_site_key,
+    is_forum_document,
+    tag_text_for_narratives,
+)
 
 logger = get_logger(__name__)
 
@@ -27,7 +32,6 @@ COLLECTION_ENTITY_MENTIONS = "entity_mentions"
 DETECTION_WINDOW = 15000
 CONTENT_QUALITY_FULL_TEXT = "full_text"
 CONTENT_QUALITY_SNIPPET = "snippet"
-_FORUM_DOMAINS = {"tradingqna.com", "traderji.com", "valuepickr.com"}
 
 
 async def _mark_processed(article_coll, doc_id) -> None:
@@ -86,6 +90,7 @@ async def run_backfill(
             url = doc.get("url") or doc.get("url_resolved") or ""
             title = (doc.get("title") or "")[:500]
             source_domain = (doc.get("source_domain") or "")[:200]
+            feed_domain = (doc.get("feed_domain") or "").strip().lower()[:200]
             published_at = doc.get("published_at") or doc.get("fetched_at")
             article_text = (doc.get("article_text") or "")[:DETECTION_WINDOW]
             rss_summary = (doc.get("summary") or "").strip()[:2000]
@@ -120,7 +125,12 @@ async def run_backfill(
             else:
                 summary = (rss_summary or title or "")[:500].strip()
             sd = (source_domain or "").strip().lower()
-            mention_type = "forum" if sd in _FORUM_DOMAINS else "article"
+            is_forum = is_forum_document(sd, feed_domain)
+            mention_type = "forum" if is_forum else "article"
+            narrative_tags, narrative_primary = tag_text_for_narratives(validation_text)
+            fsite = forum_site_key(sd, feed_domain) if is_forum else None
+            narrative_surface = "forum" if is_forum else "article"
+            narrative_role = "amplifier" if is_forum else "publication"
 
             now_utc = datetime.now(timezone.utc)
             # IMPORTANT: never delete all mentions for a URL before inserts succeed.
@@ -146,6 +156,12 @@ async def run_backfill(
                     "url": url[:2000],
                     "type": mention_type,
                     "content_quality": content_quality,
+                    "narrative_tags": narrative_tags,
+                    "narrative_primary": narrative_primary,
+                    "narrative_surface": narrative_surface,
+                    "narrative_role": narrative_role,
+                    "forum_site": fsite,
+                    "feed_domain": feed_domain or None,
                 }
                 await mentions_coll.insert_one(mention_doc)
                 inserted += 1

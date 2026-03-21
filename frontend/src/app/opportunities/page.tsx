@@ -161,7 +161,7 @@ export default function OpportunitiesPage() {
           <Link href="/" className="text-sm text-zinc-400 hover:text-zinc-200">← Chat</Link>
           <Link href="/clients" className="text-sm text-zinc-400 hover:text-zinc-200">Clients</Link>
           <Link href="/media-intelligence" className="text-sm text-zinc-400 hover:text-zinc-200">Media Intel</Link>
-          <Link href="/reports" className="text-sm text-zinc-400 hover:text-zinc-200">Reports</Link>
+          <Link href="/reports/pr" className="text-sm text-zinc-400 hover:text-zinc-200">Reports</Link>
         </div>
         <h1 className="text-xl font-semibold mb-2 text-zinc-100">PR Opportunities</h1>
         <p className="text-sm text-zinc-500 mb-4">
@@ -230,11 +230,38 @@ export default function OpportunitiesPage() {
 
             {tab === "quote-alerts" && (
               <section>
-                <p className="text-sm text-zinc-500 mb-4">Articles seeking comment (declined to comment, no response, etc.). LLM suggests action.</p>
+                <p className="text-sm text-zinc-500 mb-4">
+                  Articles that <strong className="text-zinc-400">mention your client</strong> in{" "}
+                  <code className="text-zinc-400 text-xs">article_documents</code> and whose text contains
+                  journalist &quot;seeking comment&quot; phrases (e.g. declined to comment, no comment, we reached out). An LLM then suggests a one-line action.
+                </p>
                 {loadingPrIntel && <div className="text-center py-8 text-zinc-500">Loading…</div>}
                 {!loadingPrIntel && quoteAlerts.length === 0 && (
-                  <div className="rounded-xl border border-zinc-800 bg-zinc-900/30 p-8 text-center text-zinc-500">
-                    No quote opportunities. Run the batch job or wait for the daily run.
+                  <div className="rounded-xl border border-zinc-800 bg-zinc-900/30 p-6 text-zinc-400 text-sm space-y-4">
+                    <p className="font-medium text-zinc-300">No quote opportunities right now — usually one of these:</p>
+                    <ul className="list-disc pl-5 space-y-2 text-zinc-500">
+                      <li>
+                        <strong className="text-zinc-400">Batch not run for this client</strong> — Click{" "}
+                        <strong className="text-amber-500/90">Generate / Refresh</strong> above (or wait for the scheduled job). Nothing is shown until the job writes rows to the database.
+                      </li>
+                      <li>
+                        <strong className="text-zinc-400">No matching articles in the last 7 days</strong> — The scanner only looks at{" "}
+                        <code className="text-xs text-zinc-400">article_documents</code> tagged with your client&apos;s configured{" "}
+                        <strong className="text-zinc-400">entity names</strong> (from Clients config), with recent{" "}
+                        <code className="text-xs text-zinc-400">published_at</code> or <code className="text-xs text-zinc-400">fetched_at</code>.
+                      </li>
+                      <li>
+                        <strong className="text-zinc-400">Phrases are rare</strong> — Even with coverage, most RSS/press pieces never say things like &quot;declined to comment&quot; or &quot;could not be reached&quot;. Empty here is normal; it is not a bug.
+                      </li>
+                      <li>
+                        <strong className="text-zinc-400">Missing body text</strong> — Phrases are searched in{" "}
+                        <code className="text-xs text-zinc-400">article_text</code> (then summary/title). If ingestion only stored titles, matches are unlikely.
+                      </li>
+                    </ul>
+                    <p className="text-xs text-zinc-600 pt-2 border-t border-zinc-800">
+                      Dev: run{" "}
+                      <code className="text-zinc-500">python scripts/diagnose_pr_opportunities.py --client YourClient</code> in the backend to see counts and quote-pattern candidates.
+                    </p>
                   </div>
                 )}
                 {!loadingPrIntel && quoteAlerts.length > 0 && (

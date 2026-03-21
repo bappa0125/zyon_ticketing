@@ -143,6 +143,55 @@ body {
   color: var(--ai-muted);
 }
 
+/* Narrative briefing memo card — match executive markdown readability */
+.briefing-memo-prose {
+  color: var(--ai-text-secondary);
+}
+.briefing-memo-prose p {
+  margin-top: 0.65em;
+  margin-bottom: 0.65em;
+  line-height: 1.6;
+}
+.briefing-memo-prose p:first-child {
+  margin-top: 0;
+}
+.briefing-memo-prose p:last-child {
+  margin-bottom: 0;
+}
+.briefing-memo-prose ul,
+.briefing-memo-prose ol {
+  margin: 0.5em 0 0.75em;
+  padding-left: 1.25rem;
+  list-style-position: outside;
+}
+.briefing-memo-prose ul {
+  list-style-type: disc;
+}
+.briefing-memo-prose ol {
+  list-style-type: decimal;
+}
+.briefing-memo-prose li {
+  margin: 0.35em 0;
+  line-height: 1.55;
+}
+.briefing-memo-prose li::marker {
+  color: var(--ai-muted);
+}
+.briefing-memo-prose blockquote {
+  margin: 0.75em 0;
+  padding-left: 1rem;
+  border-left: 3px solid var(--ai-border-strong);
+  color: var(--ai-muted);
+  font-style: normal;
+}
+.briefing-memo-prose code {
+  font-size: 0.9em;
+  padding: 0.1em 0.35em;
+  border-radius: 0.25rem;
+  background: var(--ai-bg-elevated);
+  border: 1px solid var(--ai-border);
+}
+
 /* Animations */
 @keyframes ai-fade-in {
   from { opacity: 0; transform: translateY(8px); }

@@ -310,6 +310,7 @@ async def run_article_fetcher(max_items: int = MAX_BATCH) -> dict[str, Any]:
             await rss_coll.update_one({"_id": item["_id"]}, {"$set": {"status": STATUS_FAILED}})
             failures += 1
             continue
+        feed_domain_val = ((item.get("source_domain") or "")[:200]).strip().lower()
         article_text, article_length, url_original, url_resolved, page_author = _fetch_and_extract(url)
         rss_author = (item.get("author") or "").strip()[:300] if isinstance(item.get("author"), str) else ""
         author = (page_author or rss_author) or None
@@ -352,6 +353,8 @@ async def run_article_fetcher(max_items: int = MAX_BATCH) -> dict[str, Any]:
                 }
                 if author:
                     doc["author"] = author
+                if feed_domain_val:
+                    doc["feed_domain"] = feed_domain_val
                 try:
                     await article_coll.insert_one(doc)
                     await rss_coll.update_one({"_id": item["_id"]}, {"$set": {"status": STATUS_PROCESSED}})
@@ -408,6 +411,8 @@ async def run_article_fetcher(max_items: int = MAX_BATCH) -> dict[str, Any]:
         }
         if author:
             doc["author"] = author
+        if feed_domain_val:
+            doc["feed_domain"] = feed_domain_val
         try:
             await article_coll.insert_one(doc)
         except Exception as e:

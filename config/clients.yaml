@@ -1,6 +1,8 @@
 clients:
   - name: Sahi
     domain: sahi.com
+    # Calendar-day buckets for narrative mention trends (IST). API ?timezone= overrides.
+    report_timezone: Asia/Kolkata
 
     aliases:
       - sahi

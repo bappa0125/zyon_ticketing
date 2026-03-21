@@ -53,6 +53,7 @@ def classify_intent(message: str) -> tuple[Intent, Optional[str]]:
     from app.services.url_discovery.intent_detector import (
         is_greeting_or_casual,
         extract_company_or_topic,
+        extract_monitored_query_entity,
     )
 
     msg = message.strip()
@@ -63,8 +64,8 @@ def classify_intent(message: str) -> tuple[Intent, Optional[str]]:
     if is_greeting_or_casual(msg):
         return ("chat", None)
 
-    # 2. Rule: entity + trigger patterns -> search
-    entity = extract_company_or_topic(msg)
+    # 2. Rule: entity + trigger patterns -> search (includes hint-style phrases)
+    entity = extract_company_or_topic(msg) or extract_monitored_query_entity(msg)
     if entity:
         return ("search", entity)
 

@@ -22,6 +22,7 @@ This document lists every pipeline that **writes** data into MongoDB: pipeline n
 | 11b. YouTube official ingest | `youtube_intel_videos` | Scheduler (`youtube_official_interval_minutes`) or `scripts/run_youtube_official_ingest.py` |
 | 12. AI search narrative | `ai_search_answers` | Scheduler (daily 10:30 UTC) or `POST /api/social/ai-search-narrative/refresh` |
 | 13. AI Search Visibility (Phase 1) | `visibility_answers`, `visibility_runs`, `visibility_weekly_snapshots`, `visibility_recommendations` | Scheduler (weekly Sun 02:00 UTC) or `POST /api/social/ai-search-visibility/refresh` |
+| 14. Forum theme digest (unbranded themes + PR pack) | `forum_theme_digest` | Scheduler (daily 10:45 UTC), `scripts/run_forum_theme_digest.py`, or `POST /api/social/forum-theme-digest/refresh` — Indian forums from `article_documents` + Reddit from `social_posts`; scores `narrative_taxonomy.yaml`; stores 3 PR deliverables (discourse map, risk/FAQ, content angles) |
 
 *Chat and app data (conversations, messages) are written by `app/services/mongodb.py` and are not ingestion pipelines.*
 
@@ -71,6 +72,22 @@ These all use the **same** clients file:
 `python backend/scripts/run_article_fetcher.py`
 
 **Responsible for:** Turning RSS links into full-text articles in `article_documents`. Does **not** run entity detection or fill `entity_mentions`.
+
+**`feed_domain`:** Each `article_documents` row from RSS includes `feed_domain` (the registry `domain` for that feed). Used so syndicated links (e.g. **Hacker News** → external article host) still classify as **forum** in `entity_mentions` when the item came from a forum RSS.
+
+---
+
+## 2b. Entity mentions + narrative tags → `entity_mentions`
+
+**What it does:** Reads `article_documents` (unprocessed), detects entities, validates context, writes **`entity_mentions`**. Applies **`config/narrative_taxonomy.yaml`** keyword tags (`narrative_tags`, `narrative_primary`), sets **`type=forum`** for TradingQnA / ValuePickr / Traderji pages **or** HN-fed articles (`feed_domain=news.ycombinator.com`), and **`narrative_role=amplifier`** on forums.
+
+| File | Role |
+|------|------|
+| `backend/app/services/entity_mentions_worker.py` | Main pipeline. |
+| `backend/app/services/narrative_tagging_service.py` | Loads taxonomy; forum detection helpers. |
+| `backend/scripts/backfill_entity_mentions_multi.py` | Backfill / reprocess with same fields. |
+
+**APIs:** `GET /api/social/forum-mentions`, `GET /api/social/forum-mentions/narrative-tags`. **Doc:** `docs/NARRATIVE_TAXONOMY.md`.
 
 ---
 

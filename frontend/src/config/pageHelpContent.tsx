@@ -414,7 +414,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
   "/opportunities": {
     title: "PR Opportunities",
     summary:
-      "Topic gaps (where competitors have coverage and the client does not), plus three LLM-assisted tabs: quote opportunities, outreach drafts, and competitor response angles. All depend on recent media ingestion and correct client entity names.",
+      "Topic gaps (where competitors have coverage and the client does not), plus three LLM-assisted tabs: story comment alerts (no-comment phrasing in ingested news), outreach drafts, and competitor response angles. The Story comment alerts tab includes an on-page explainer for leadership. All depend on recent media ingestion and correct client entity names.",
     sections: [
       {
         sectionTitle: "Topic gaps",
@@ -433,7 +433,7 @@ export const PAGE_HELP: Record<string, PageHelp> = {
         ),
       },
       {
-        sectionTitle: "Quote opportunities (often empty — by design)",
+        sectionTitle: "Story comment alerts (often empty — by design)",
         whatItIs: (
           <p className={p}>
             Not general “good stories.” The backend only flags <strong className={strong}>article_documents</strong> from the{" "}

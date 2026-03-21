@@ -144,7 +144,7 @@ export default function OpportunitiesPage() {
 
   const tabs: { id: TabId; label: string }[] = [
     { id: "topics", label: "Topic gaps" },
-    { id: "quote-alerts", label: "Quote opportunities" },
+    { id: "quote-alerts", label: "Story comment alerts" },
     { id: "outreach-drafts", label: "Outreach drafts" },
     { id: "competitor-responses", label: "Competitor responses" },
   ];
@@ -165,7 +165,7 @@ export default function OpportunitiesPage() {
         </div>
         <h1 className="text-xl font-semibold mb-2 text-zinc-100">PR Opportunities</h1>
         <p className="text-sm text-zinc-500 mb-4">
-          Topic gaps (competitors have coverage, client doesn&apos;t) and LLM-powered opportunities: quote alerts, outreach drafts, competitor response angles.
+          Topic gaps (competitors have coverage, client doesn&apos;t), plus story comment alerts (no-comment wording in ingested news), outreach drafts, and competitor response angles — each tab explains what it is in plain language.
         </p>
         <div className="flex flex-wrap items-center gap-4 mb-6">
           <div className="flex items-center gap-2">
@@ -229,43 +229,76 @@ export default function OpportunitiesPage() {
             )}
 
             {tab === "quote-alerts" && (
-              <section>
-                <p className="text-sm text-zinc-500 mb-4">
-                  Articles that <strong className="text-zinc-400">mention your client</strong> in{" "}
-                  <code className="text-zinc-400 text-xs">article_documents</code> and whose text contains
-                  journalist &quot;seeking comment&quot; phrases (e.g. declined to comment, no comment, we reached out). An LLM then suggests a one-line action.
-                </p>
+              <section className="space-y-6">
+                {/* Plain-language explainer for MD + day-to-day use */}
+                <div className="rounded-xl border-2 border-amber-600/40 bg-amber-950/20 p-5 sm:p-6 space-y-4">
+                  <h2 className="text-base font-semibold text-zinc-100 leading-snug">
+                    Story comment alerts — what you&apos;re looking at
+                  </h2>
+                  <div className="space-y-3 text-sm text-zinc-300 leading-relaxed">
+                    <p>
+                      <strong className="text-zinc-100">In one line:</strong> We scan <strong className="text-zinc-100">recent news we already ingested</strong> and flag stories where the <strong className="text-zinc-100">wording suggests someone did not give the journalist a quote</strong> (for example &quot;declined to comment&quot; or &quot;did not respond&quot;). We only include stories that <strong className="text-zinc-100">also mention the client you selected</strong> at the top of this page.
+                    </p>
+                    <p>
+                      <strong className="text-zinc-100">Example:</strong> An article says{" "}
+                      <em className="text-zinc-200 not-italic border-l-2 border-amber-500/60 pl-3 block my-2 py-1 bg-zinc-900/40 rounded-r">
+                        &quot;The bank <span className="text-amber-400/95">declined to comment</span> on the probe.&quot;
+                      </em>{" "}
+                      If that same piece mentions your client somewhere, it may appear here. Your team still <strong className="text-zinc-100">reads the full story</strong> to see <strong className="text-zinc-100">who</strong> declined and whether <strong className="text-zinc-100">pitching your client&apos;s perspective</strong> is appropriate and approved.
+                    </p>
+                    <div className="rounded-lg bg-zinc-900/60 border border-zinc-700 p-4 space-y-2">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-amber-500/90">What to do next (call to action)</p>
+                      <ol className="list-decimal pl-5 space-y-2 text-zinc-300">
+                        <li>
+                          Click <strong className="text-amber-400">Generate / Refresh</strong> (top of page) so this list is built from the latest saved news — otherwise you may see nothing.
+                        </li>
+                        <li>
+                          For each row: <strong className="text-zinc-100">open the article</strong> → confirm the situation → find <strong className="text-zinc-100">the right reporter or desk</strong> → follow your <strong className="text-zinc-100">internal / compliance process</strong> before contacting anyone.
+                        </li>
+                        <li>
+                          Treat the &quot;Suggested action&quot; column as a <strong className="text-zinc-100">starter idea</strong>, not approved messaging.
+                        </li>
+                      </ol>
+                    </div>
+                    <div className="rounded-lg border border-zinc-700/80 bg-zinc-950/40 p-4 space-y-2">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">What this tab is not</p>
+                      <ul className="list-disc pl-5 space-y-1.5 text-zinc-400 text-sm">
+                        <li>It is <strong className="text-zinc-300">not</strong> HARO, Twitter &quot;journalists seeking sources,&quot; or a live newswire of every quote request.</li>
+                        <li>An empty list is <strong className="text-zinc-300">often normal</strong> — most articles never use those exact phrases.</li>
+                        <li>It does <strong className="text-zinc-300">not</strong> replace judgment: the &quot;no comment&quot; may refer to another company, not your client.</li>
+                      </ul>
+                    </div>
+                    <p className="text-xs text-zinc-500 pt-1">
+                      <strong className="text-zinc-400">For leadership:</strong> This is a <strong className="text-zinc-300">narrow, automated research hint</strong> layered on owned media data — valuable when it fires, but not the same as a full opportunity pipeline.
+                    </p>
+                  </div>
+                </div>
+
+                <details className="rounded-lg border border-zinc-800 bg-zinc-900/20 px-4 py-3 text-sm text-zinc-500">
+                  <summary className="cursor-pointer text-zinc-400 hover:text-zinc-300 font-medium">
+                    Technical details (optional — for ops / engineering)
+                  </summary>
+                  <ul className="list-disc pl-5 mt-3 space-y-1.5 text-xs text-zinc-500">
+                    <li>Source: <code className="text-zinc-400">article_documents</code> with client entities (Clients config), last ~7 days, text from body / summary / title.</li>
+                    <li>Diagnostics: <code className="text-zinc-400">python scripts/diagnose_pr_opportunities.py --client YourClient</code> in the backend.</li>
+                  </ul>
+                </details>
+
                 {loadingPrIntel && <div className="text-center py-8 text-zinc-500">Loading…</div>}
                 {!loadingPrIntel && quoteAlerts.length === 0 && (
-                  <div className="rounded-xl border border-zinc-800 bg-zinc-900/30 p-6 text-zinc-400 text-sm space-y-4">
-                    <p className="font-medium text-zinc-300">No quote opportunities right now — usually one of these:</p>
-                    <ul className="list-disc pl-5 space-y-2 text-zinc-500">
-                      <li>
-                        <strong className="text-zinc-400">Batch not run for this client</strong> — Click{" "}
-                        <strong className="text-amber-500/90">Generate / Refresh</strong> above (or wait for the scheduled job). Nothing is shown until the job writes rows to the database.
-                      </li>
-                      <li>
-                        <strong className="text-zinc-400">No matching articles in the last 7 days</strong> — The scanner only looks at{" "}
-                        <code className="text-xs text-zinc-400">article_documents</code> tagged with your client&apos;s configured{" "}
-                        <strong className="text-zinc-400">entity names</strong> (from Clients config), with recent{" "}
-                        <code className="text-xs text-zinc-400">published_at</code> or <code className="text-xs text-zinc-400">fetched_at</code>.
-                      </li>
-                      <li>
-                        <strong className="text-zinc-400">Phrases are rare</strong> — Even with coverage, most RSS/press pieces never say things like &quot;declined to comment&quot; or &quot;could not be reached&quot;. Empty here is normal; it is not a bug.
-                      </li>
-                      <li>
-                        <strong className="text-zinc-400">Missing body text</strong> — Phrases are searched in{" "}
-                        <code className="text-xs text-zinc-400">article_text</code> (then summary/title). If ingestion only stored titles, matches are unlikely.
-                      </li>
-                    </ul>
-                    <p className="text-xs text-zinc-600 pt-2 border-t border-zinc-800">
-                      Dev: run{" "}
-                      <code className="text-zinc-500">python scripts/diagnose_pr_opportunities.py --client YourClient</code> in the backend to see counts and quote-pattern candidates.
+                  <div className="rounded-xl border border-zinc-800 bg-zinc-900/30 p-6 text-zinc-400 text-sm space-y-3">
+                    <p className="font-medium text-zinc-300">No rows in the table right now</p>
+                    <p className="text-zinc-500">
+                      That is expected if you haven&apos;t clicked <strong className="text-amber-500/90">Generate / Refresh</strong> yet, or if none of your recent ingested articles both <strong className="text-zinc-400">mention this client</strong> and <strong className="text-zinc-400">contain phrases</strong> like the example in the amber box above. Scroll up — the yellow box explains what this feature does and does not promise.
                     </p>
                   </div>
                 )}
                 {!loadingPrIntel && quoteAlerts.length > 0 && (
-                  <div className={cardClass}>
+                  <>
+                    <p className="text-sm text-zinc-500">
+                      Below: starter list only. Each row needs <strong className="text-zinc-400">human review</strong> before outreach (see steps in the amber box above).
+                    </p>
+                    <div className={cardClass}>
                     <table className="min-w-full">
                       <thead className="bg-zinc-900/50">
                         <tr>
@@ -289,6 +322,7 @@ export default function OpportunitiesPage() {
                       </tbody>
                     </table>
                   </div>
+                  </>
                 )}
               </section>
             )}

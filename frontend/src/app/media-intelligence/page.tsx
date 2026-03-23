@@ -9,7 +9,8 @@ import { TopPublicationsList } from "@/components/MediaIntelligence/TopPublicati
 import { TopicsList } from "@/components/MediaIntelligence/TopicsList";
 import { CoverageByDomain, type DomainRow } from "@/components/MediaIntelligence/CoverageByDomain";
 import { PRSummaryCard } from "@/components/MediaIntelligence/PRSummaryCard";
-import { getApiBase } from "@/lib/api";
+import { getApiBase, withClientQuery } from "@/lib/api";
+import { useActiveClient } from "@/context/ClientContext";
 
 interface DashboardMeta {
   unified_mentions_count?: number;
@@ -39,37 +40,15 @@ const RANGE_OPTIONS = [
 ] as const;
 
 export default function MediaIntelligencePage() {
-  const [clients, setClients] = useState<{ name: string }[]>([]);
-  const [client, setClient] = useState<string>("");
+  const { clientName: client, ready: clientReady } = useActiveClient();
   const [range, setRange] = useState<string>("7d");
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [loadingClients, setLoadingClients] = useState(true);
   const [selectedDomain, setSelectedDomain] = useState<string | null>(null);
   const [contentQuality, setContentQuality] = useState<string>("");
 
   useEffect(() => {
-    async function fetchClients() {
-      try {
-        const res = await fetch(`${getApiBase()}/clients`);
-        if (!res.ok) throw new Error("Failed to load clients");
-        const json = await res.json();
-        const list = json.clients ?? [];
-        setClients(list);
-        if (list.length > 0 && !client) setClient(list[0].name);
-      } catch (e) {
-        console.error(e);
-        setClients([]);
-      } finally {
-        setLoadingClients(false);
-      }
-    }
-    fetchClients();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch clients once on mount; default client set from first load
-  }, []);
-
-  useEffect(() => {
-    if (!client.trim()) {
+    if (!clientReady || !client?.trim()) {
       setData(null);
       setLoading(false);
       return;
@@ -85,7 +64,7 @@ export default function MediaIntelligencePage() {
     (async () => {
       try {
         const res = await fetch(
-          `${getApiBase()}/media-intelligence/dashboard?${params.toString()}`,
+          withClientQuery(`${getApiBase()}/media-intelligence/dashboard?${params.toString()}`, client),
           { cache: "no-store" }
         );
         if (!res.ok) throw new Error("Dashboard failed");
@@ -101,11 +80,19 @@ export default function MediaIntelligencePage() {
     return () => {
       cancelled = true;
     };
-  }, [client, range, selectedDomain, contentQuality]);
+  }, [client, range, selectedDomain, contentQuality, clientReady]);
 
   const entities = data ? [data.client, ...(data.competitors || [])] : [];
   const totalMentions = data?.coverage?.reduce((s, c) => s + c.mentions, 0) ?? 0;
   const feedItems = data?.feed ?? [];
+
+  if (!clientReady || !client) {
+    return (
+      <div className="app-page p-6">
+        <p className="text-sm text-zinc-500">Loading client…</p>
+      </div>
+    );
+  }
 
   return (
     <div className="app-page">
@@ -131,28 +118,9 @@ export default function MediaIntelligencePage() {
 
         {/* Entity selector + date filter */}
         <section className="flex flex-wrap items-center gap-4 mb-6 p-4 rounded-lg border border-zinc-800 bg-zinc-900/30">
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-zinc-400">Client</label>
-            <select
-              value={client}
-              onChange={(e) => setClient(e.target.value)}
-              disabled={loadingClients}
-              className="px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-600 min-w-[160px]"
-            >
-              {loadingClients && (
-                <option value="">Loading…</option>
-              )}
-              {!loadingClients && (
-                <>
-                  <option value="">Select client</option>
-                  {clients.map((c) => (
-                    <option key={c.name} value={c.name}>
-                      {c.name}
-                    </option>
-                  ))}
-                </>
-              )}
-            </select>
+          <div className="flex items-center gap-2 text-sm text-zinc-400">
+            <span>Client</span>
+            <span className="text-zinc-100 font-semibold">{client}</span>
           </div>
           <div className="flex items-center gap-2">
             <label className="text-sm text-zinc-400">Period</label>
@@ -206,14 +174,7 @@ export default function MediaIntelligencePage() {
           )}
         </section>
 
-        {!client.trim() && (
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-8 text-center text-zinc-500">
-            Select a client to view the dashboard.
-          </div>
-        )}
-
-        {client.trim() && (
-          <>
+        <>
             {/* Coverage overview + summary */}
             <section className="mb-6">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
@@ -293,8 +254,7 @@ export default function MediaIntelligencePage() {
                 <TopicsList topics={data?.topics ?? []} loading={loading} />
               </div>
             </div>
-          </>
-        )}
+        </>
       </div>
     </div>
   );

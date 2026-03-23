@@ -5,7 +5,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CoverageChart, CoverageRow } from "@/components/CoverageChart";
 import Link from "next/link";
-import { getApiBase } from "@/lib/api";
+import { getApiBase, withClientQuery } from "@/lib/api";
+import { useActiveClient } from "@/context/ClientContext";
 
 interface CompetitorOnlyArticle {
   url: string;
@@ -34,6 +35,7 @@ const TABLE_CELL_CLASS = "py-3 px-4 text-zinc-200 border-b border-zinc-800";
 const TABLE_CELL_MUTED = "py-3 px-4 text-zinc-400 border-b border-zinc-800";
 
 export default function CoveragePage() {
+  const { clientName: clientFilter, ready: clientReady } = useActiveClient();
   const [coverage, setCoverage] = useState<CoverageRow[]>([]);
   const [competitorOnly, setCompetitorOnly] = useState<{
     has_competitor_only_articles: boolean;
@@ -54,11 +56,11 @@ export default function CoveragePage() {
     computed_at: string | null;
   } | null>(null);
   const [loading, setLoading] = useState(true);
-  const [clientFilter, setClientFilter] = useState<string>("Sahi");
 
   useEffect(() => {
     async function fetchCoverage() {
-      if (!clientFilter.trim()) {
+      const cname = clientFilter?.trim() ?? "";
+      if (!clientReady || !cname) {
         setCoverage([]);
         setCompetitorOnly(null);
         setCounts(null);
@@ -70,15 +72,36 @@ export default function CoveragePage() {
       setLoading(true);
       try {
         const [covRes, compRes, countsRes, mentionsRes, summaryRes] = await Promise.all([
-          fetch(`${getApiBase()}/coverage/competitors?client=${encodeURIComponent(clientFilter)}`),
           fetch(
-            `${getApiBase()}/coverage/competitor-only-articles?client=${encodeURIComponent(clientFilter)}&limit=20`
+            withClientQuery(
+              `${getApiBase()}/coverage/competitors?client=${encodeURIComponent(cname)}`,
+              cname
+            )
           ),
-          fetch(`${getApiBase()}/coverage/article-counts?client=${encodeURIComponent(clientFilter)}`),
           fetch(
-            `${getApiBase()}/coverage/mentions?client=${encodeURIComponent(clientFilter)}&limit=20`
+            withClientQuery(
+              `${getApiBase()}/coverage/competitor-only-articles?client=${encodeURIComponent(cname)}&limit=20`,
+              cname
+            )
           ),
-          fetch(`${getApiBase()}/coverage/pr-summary?client=${encodeURIComponent(clientFilter)}`),
+          fetch(
+            withClientQuery(
+              `${getApiBase()}/coverage/article-counts?client=${encodeURIComponent(cname)}`,
+              cname
+            )
+          ),
+          fetch(
+            withClientQuery(
+              `${getApiBase()}/coverage/mentions?client=${encodeURIComponent(cname)}&limit=20`,
+              cname
+            )
+          ),
+          fetch(
+            withClientQuery(
+              `${getApiBase()}/coverage/pr-summary?client=${encodeURIComponent(cname)}`,
+              cname
+            )
+          ),
         ]);
         if (!covRes.ok) throw new Error(`HTTP ${covRes.status}`);
         if (!compRes.ok) throw new Error(`HTTP ${compRes.status}`);
@@ -123,7 +146,17 @@ export default function CoveragePage() {
       }
     }
     fetchCoverage();
-  }, [clientFilter]);
+    // clientFilter + clientReady drive refetch when header client changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: sync fetches to active client
+  }, [clientFilter, clientReady]);
+
+  if (!clientReady || !clientFilter) {
+    return (
+      <div className="app-page min-h-screen bg-zinc-950 text-zinc-100 p-6">
+        <p className="text-zinc-400">Loading client…</p>
+      </div>
+    );
+  }
 
   return (
     <div className="app-page min-h-screen bg-zinc-950 text-zinc-100">
@@ -158,21 +191,14 @@ export default function CoveragePage() {
           </p>
         </header>
 
-        <div className="mb-6 flex flex-wrap items-center gap-3">
-          <label className="text-base text-zinc-300 font-medium">Client</label>
-          <input
-            type="text"
-            placeholder="e.g. Sahi"
-            value={clientFilter}
-            onChange={(e) => setClientFilter(e.target.value)}
-            className="px-4 py-2.5 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-100 placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-500 focus:border-zinc-600 min-w-[180px] text-base"
-          />
-        </div>
+        <p className="mb-6 text-base text-zinc-400">
+          Client: <strong className="text-zinc-100">{clientFilter}</strong> (header switcher)
+        </p>
 
         <CoverageChart coverage={coverage} loading={loading} />
 
         {/* PR summary at top — LLM-generated once per day */}
-        {clientFilter.trim() && (
+        {clientFilter && (
           <section className="mt-8 rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
             <h2 className="text-lg font-semibold text-zinc-100 mb-1">
               Coverage intel for PR team

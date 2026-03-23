@@ -6,7 +6,8 @@ import { ShareOfVoiceDonut } from "@/components/MediaIntelligence/ShareOfVoiceDo
 import { MentionsPerDayChart, type TimelineRow } from "@/components/MediaIntelligence/MentionsPerDayChart";
 import { RankedSourcesTable, type RankedSourceRow } from "@/components/MediaIntelligence/RankedSourcesTable";
 import { TopPublicationsList, type PubRow } from "@/components/MediaIntelligence/TopPublicationsList";
-import { getApiBase } from "@/lib/api";
+import { getApiBase, withClientQuery } from "@/lib/api";
+import { useActiveClient } from "@/context/ClientContext";
 
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -89,10 +90,8 @@ interface AIBriefResponse {
 }
 
 export default function DashboardPage() {
-  const [clients, setClients] = useState<{ name: string }[]>([]);
-  const [client, setClient] = useState<string>("");
+  const { clientName: client, ready: clientReady } = useActiveClient();
   const [range, setRange] = useState<RangeValue>("7d");
-  const [loadingClients, setLoadingClients] = useState(true);
   const [loading, setLoading] = useState(false);
   const [pulse, setPulse] = useState<PulseResponse | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
@@ -104,39 +103,20 @@ export default function DashboardPage() {
   const [articlesLoading, setArticlesLoading] = useState(false);
   const [selectedEntity, setSelectedEntity] = useState<string>("");
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch(`${getApiBase()}/clients`);
-        if (!res.ok) throw new Error("clients failed");
-        const json = await res.json();
-        const list = json.clients ?? [];
-        setClients(list);
-        if (list.length > 0 && !client) setClient(list[0].name);
-      } catch (e) {
-        console.error(e);
-        setClients([]);
-      } finally {
-        setLoadingClients(false);
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const downloadUrl = useMemo(() => {
-    if (!client.trim()) return "";
+    if (!client?.trim()) return "";
     const params = new URLSearchParams({ client: client.trim(), range });
     return `${getApiBase()}/reports/pulse.html?${params.toString()}`;
   }, [client, range]);
 
   const pdfDownloadUrl = useMemo(() => {
-    if (!client.trim()) return "";
+    if (!client?.trim()) return "";
     const params = new URLSearchParams({ client: client.trim(), range });
     return `${getApiBase()}/reports/pulse.pdf?${params.toString()}`;
   }, [client, range]);
 
   useEffect(() => {
-    if (!client.trim()) {
+    if (!clientReady || !client?.trim()) {
       setAiBrief(null);
       setAiError("");
       return;
@@ -146,7 +126,9 @@ export default function DashboardPage() {
     (async () => {
       try {
         const params = new URLSearchParams({ client: client.trim(), range });
-        const res = await fetch(`${getApiBase()}/reports/ai-brief?${params.toString()}`);
+        const res = await fetch(
+          withClientQuery(`${getApiBase()}/reports/ai-brief?${params.toString()}`, client)
+        );
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (!cancelled && data.brief) {
@@ -166,10 +148,10 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [client, range]);
+  }, [client, range, clientReady]);
 
   useEffect(() => {
-    if (!client.trim()) {
+    if (!clientReady || !client?.trim()) {
       setPulse(null);
       return;
     }
@@ -178,7 +160,9 @@ export default function DashboardPage() {
     (async () => {
       try {
         const params = new URLSearchParams({ client: client.trim(), range });
-        const res = await fetch(`${getApiBase()}/reports/pulse?${params.toString()}`);
+        const res = await fetch(
+          withClientQuery(`${getApiBase()}/reports/pulse?${params.toString()}`, client)
+        );
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = (await res.json()) as PulseResponse;
         if (!cancelled) setPulse(data);
@@ -192,7 +176,7 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [client, range]);
+  }, [client, range, clientReady]);
 
   const dashboard = pulse?.dashboard;
   const coverage = dashboard?.coverage ?? [];
@@ -226,7 +210,7 @@ export default function DashboardPage() {
 
   // Load articles for selected entity
   useEffect(() => {
-    if (!client.trim() || !selectedEntity) {
+    if (!clientReady || !client?.trim() || !selectedEntity) {
       setArticles([]);
       setArticlesTotal(0);
       return;
@@ -242,7 +226,9 @@ export default function DashboardPage() {
           page: String(articlesPage),
           page_size: "25",
         });
-        const res = await fetch(`${getApiBase()}/reports/pulse/articles?${params.toString()}`);
+        const res = await fetch(
+          withClientQuery(`${getApiBase()}/reports/pulse/articles?${params.toString()}`, client)
+        );
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = (await res.json()) as PulseArticlesResponse;
         if (!cancelled) {
@@ -262,7 +248,15 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [client, range, selectedEntity, articlesPage]);
+  }, [client, range, selectedEntity, articlesPage, clientReady]);
+
+  if (!clientReady || !client) {
+    return (
+      <div className="app-page">
+        <p className="text-sm text-[var(--ai-muted)]">Loading client…</p>
+      </div>
+    );
+  }
 
   return (
     <div className="app-page">
@@ -271,29 +265,10 @@ export default function DashboardPage() {
           <div>
             <h1 className="text-xl font-semibold text-[var(--mw-text)]">Executive PR Pulse</h1>
             <p className="text-sm text-[var(--mw-muted)] mt-1">
-              Interactive view + downloadable HTML brief.
+              Interactive view + downloadable HTML brief for <strong>{client}</strong>.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            <select
-              value={client}
-              onChange={(e) => setClient(e.target.value)}
-              disabled={loadingClients}
-              className="app-select min-w-[160px]"
-            >
-              {loadingClients ? (
-                <option value="">Loading…</option>
-              ) : (
-                <>
-                  <option value="">Select client</option>
-                  {clients.map((c) => (
-                    <option key={c.name} value={c.name}>
-                      {c.name}
-                    </option>
-                  ))}
-                </>
-              )}
-            </select>
             <select
               value={range}
               onChange={(e) => setRange(e.target.value as RangeValue)}
@@ -326,15 +301,7 @@ export default function DashboardPage() {
           </div>
         </header>
 
-        {!client.trim() && (
-          <div className="app-card-muted p-8 text-center text-[var(--mw-muted)]">
-            Select a client to view the pulse.
-          </div>
-        )}
-
-        {client.trim() && (
-          <>
-            <section className="mb-6 animate-ai-stagger">
+        <section className="mb-6 animate-ai-stagger">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                 <div className="app-card p-4">
                   <p className="text-xs text-[var(--mw-muted)] uppercase tracking-wider">Total mentions</p>
@@ -659,12 +626,10 @@ export default function DashboardPage() {
               )}
             </section>
 
-            {!loading && !pulse && (
-              <div className="app-card-muted p-6 text-[var(--mw-muted)]">
-                No data found for this client/range yet.
-              </div>
-            )}
-          </>
+        {!loading && !pulse && (
+          <div className="app-card-muted p-6 text-[var(--mw-muted)]">
+            No data found for this client/range yet.
+          </div>
         )}
       </div>
     </div>

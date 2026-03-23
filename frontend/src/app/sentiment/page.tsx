@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { SentimentChart, type SentimentSummary } from "@/components/SentimentChart";
 import { SentimentMentionCard } from "@/components/Sentiment/SentimentMentionCard";
 import type { MediaMentionItem } from "@/components/MediaIntelligence/MediaMentionCard";
 import Link from "next/link";
 
-import { getApiBase } from "@/lib/api";
+import { getApiBase, withClientQuery } from "@/lib/api";
+import { useActiveClient } from "@/context/ClientContext";
 
 const RANGE_OPTIONS = [
   { value: "24h", label: "24h" },
@@ -21,15 +22,8 @@ const SENTIMENT_FILTERS = [
   { value: "negative", label: "Negative" },
 ] as const;
 
-interface ClientWithCompetitors {
-  name: string;
-  domain?: string;
-  competitors?: string[];
-}
-
 export default function SentimentPage() {
-  const [clients, setClients] = useState<ClientWithCompetitors[]>([]);
-  const [client, setClient] = useState<string>("");
+  const { clientName: client, activeClient, ready: clientReady } = useActiveClient();
   const [competitor, setCompetitor] = useState<string>("");
   const [competitorFilter, setCompetitorFilter] = useState<string>("");
   const [range, setRange] = useState<string>("7d");
@@ -37,38 +31,16 @@ export default function SentimentPage() {
   const [summaries, setSummaries] = useState<SentimentSummary[]>([]);
   const [mentions, setMentions] = useState<MediaMentionItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [loadingClients, setLoadingClients] = useState(true);
   const [loadingMentions, setLoadingMentions] = useState(true);
 
-  useEffect(() => {
-    async function fetchClients() {
-      try {
-        const res = await fetch(`${getApiBase()}/clients`);
-        if (!res.ok) throw new Error("Failed to load clients");
-        const json = await res.json();
-        const list = (json.clients ?? []).map((c: { name?: string; domain?: string; competitors?: string[] }) => ({
-          name: (c.name ?? "").trim(),
-          domain: (c.domain ?? "").trim(),
-          competitors: Array.isArray(c.competitors) ? c.competitors.map(String) : [],
-        }));
-        setClients(list);
-        if (list.length > 0 && !client) setClient(list[0].name);
-      } catch (e) {
-        console.error(e);
-        setClients([]);
-      } finally {
-        setLoadingClients(false);
-      }
-    }
-    fetchClients();
-  }, []);
-
-  const clientObj = clients.find((c) => c.name.toLowerCase() === client.toLowerCase());
-  const entities = clientObj ? [clientObj.name, ...(clientObj.competitors ?? [])] : [];
+  const entities = useMemo(() => {
+    if (!activeClient) return [];
+    return [activeClient.name, ...(activeClient.competitors ?? [])];
+  }, [activeClient]);
   const effectiveEntity = competitorFilter.trim() || competitor;
 
   useEffect(() => {
-    if (!client.trim()) {
+    if (!clientReady || !client?.trim()) {
       setSummaries([]);
       setLoading(false);
       return;
@@ -76,15 +48,15 @@ export default function SentimentPage() {
     setLoading(true);
     const params = new URLSearchParams({ client });
     if (effectiveEntity) params.set("entity", effectiveEntity);
-    fetch(`${getApiBase()}/sentiment/summary?${params.toString()}`)
+    fetch(withClientQuery(`${getApiBase()}/sentiment/summary?${params.toString()}`, client))
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
       .then((data) => setSummaries(data.summaries ?? []))
       .catch(() => setSummaries([]))
       .finally(() => setLoading(false));
-  }, [client, effectiveEntity]);
+  }, [client, effectiveEntity, clientReady]);
 
   useEffect(() => {
-    if (!client.trim()) {
+    if (!clientReady || !client?.trim()) {
       setMentions([]);
       setLoadingMentions(false);
       return;
@@ -93,20 +65,28 @@ export default function SentimentPage() {
     const params = new URLSearchParams({ client, range });
     if (sentimentFilter) params.set("sentiment", sentimentFilter);
     if (effectiveEntity) params.set("entity", effectiveEntity);
-    fetch(`${getApiBase()}/sentiment/mentions?${params.toString()}`)
+    fetch(withClientQuery(`${getApiBase()}/sentiment/mentions?${params.toString()}`, client))
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
       .then((data) => setMentions(data.mentions ?? []))
       .catch(() => setMentions([]))
       .finally(() => setLoadingMentions(false));
-  }, [client, range, sentimentFilter, effectiveEntity]);
+  }, [client, range, sentimentFilter, effectiveEntity, clientReady]);
 
   useEffect(() => {
     if (client && competitor && !entities.includes(competitor)) setCompetitor("");
-  }, [client, entities, competitor]);
+  }, [client, competitor, entities]);
   const totalArticles = summaries.reduce((s, x) => s + x.positive + x.neutral + x.negative, 0);
   const totalPositive = summaries.reduce((s, x) => s + x.positive, 0);
   const totalNeutral = summaries.reduce((s, x) => s + x.neutral, 0);
   const totalNegative = summaries.reduce((s, x) => s + x.negative, 0);
+
+  if (!clientReady || !client) {
+    return (
+      <div className="min-h-screen bg-zinc-950 text-zinc-200 p-6">
+        <p className="text-sm text-zinc-500">Loading client…</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-200">
@@ -144,24 +124,10 @@ export default function SentimentPage() {
 
         <section className="rounded-xl border border-zinc-800 bg-zinc-900/30 p-4 mb-6">
           <div className="flex flex-wrap items-end gap-4">
-            <div className="flex items-center gap-2">
-              <label className="text-sm font-medium text-zinc-400">Client</label>
-              <select
-                value={clients.some((c) => c.name === client) ? client : ""}
-                onChange={(e) => setClient(e.target.value)}
-                disabled={loadingClients}
-                className="px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-600 min-w-[140px]"
-              >
-                <option value="">Select client</option>
-                {clients.map((c) => (
-                  <option key={c.name} value={c.name}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-              {loadingClients && (
-                <span className="text-xs text-zinc-500">Loading…</span>
-              )}
+            <div className="flex items-center gap-2 text-sm text-zinc-400">
+              <span className="font-medium">Client</span>
+              <span className="text-zinc-200 font-semibold">{client}</span>
+              <span className="text-xs text-zinc-500">(switch in header)</span>
             </div>
             <div className="flex items-center gap-2">
               <label className="text-sm font-medium text-zinc-400">Period</label>
@@ -223,19 +189,7 @@ export default function SentimentPage() {
           </div>
         </section>
 
-        {!client.trim() ? (
-          <div className="rounded-xl border border-zinc-800 bg-zinc-900/30 p-12 text-center">
-            <p className="text-zinc-400 mb-2">Select a client above to view sentiment analysis.</p>
-            <p className="text-sm text-zinc-500">
-              {loadingClients
-                ? "Loading clients…"
-                : clients.length === 0
-                  ? "No clients found. Check that the backend is running and config/clients.yaml is loaded."
-                  : "Choose a client from the dropdown to see sentiment counts and article mentions."}
-            </p>
-          </div>
-        ) : (
-          <>
+        <>
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
               <div className="lg:col-span-2">
                 <SentimentChart summaries={summaries} loading={loading} />
@@ -282,8 +236,7 @@ export default function SentimentPage() {
                 </div>
               )}
             </section>
-          </>
-        )}
+        </>
       </div>
     </div>
   );

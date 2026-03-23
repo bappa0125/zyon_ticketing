@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { SocialTable, SocialPost } from "@/components/SocialTable";
 
-import { getApiBase } from "@/lib/api";
+import { getApiBase, withClientQuery } from "@/lib/api";
+import { useActiveClient } from "@/context/ClientContext";
 
 /** Animated bar for charts - fills on load */
 /** Animated bar for charts - fills on load */
@@ -98,6 +99,7 @@ interface YoutubeNarrativeSummary {
 }
 
 export default function SocialPage() {
+  const { clientName: activeClient, ready: clientReady } = useActiveClient();
   const [posts, setPosts] = useState<SocialPost[]>([]);
   const [loading, setLoading] = useState(true);
   const [entityFilter, setEntityFilter] = useState<string>("");
@@ -118,7 +120,8 @@ export default function SocialPage() {
 
   const fetchRedditTrending = useCallback(async () => {
     setRedditError(null);
-    const url = `${getApiBase()}/social/reddit-trending?limit=80`;
+    const base = `${getApiBase()}/social/reddit-trending?limit=80`;
+    const url = clientReady && activeClient ? withClientQuery(base, activeClient) : base;
     try {
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -142,7 +145,7 @@ export default function SocialPage() {
       setRedditLoading(false);
       setRedditRefreshing(false);
     }
-  }, []);
+  }, [activeClient, clientReady]);
 
   useEffect(() => {
     fetchRedditTrending();
@@ -151,7 +154,10 @@ export default function SocialPage() {
   const fetchYoutubeNarrative = useCallback(async () => {
     setYoutubeError(null);
     try {
-      const res = await fetch(`${getApiBase()}/social/youtube-narrative?limit=30`);
+      const base = `${getApiBase()}/social/youtube-narrative?limit=30`;
+      const res = await fetch(
+        clientReady && activeClient ? withClientQuery(base, activeClient) : base
+      );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setYoutubeNarrative(Array.isArray(data.summaries) ? data.summaries : []);
@@ -163,7 +169,7 @@ export default function SocialPage() {
       setYoutubeLoading(false);
       setYoutubeRefreshing(false);
     }
-  }, []);
+  }, [activeClient, clientReady]);
 
   useEffect(() => {
     fetchYoutubeNarrative();
@@ -172,7 +178,11 @@ export default function SocialPage() {
   const handleRefreshYoutubeNarrative = async () => {
     setYoutubeRefreshing(true);
     try {
-      const res = await fetch(`${getApiBase()}/social/youtube-narrative/refresh`, { method: "POST" });
+      const base = `${getApiBase()}/social/youtube-narrative/refresh`;
+      const res = await fetch(
+        clientReady && activeClient ? withClientQuery(base, activeClient) : base,
+        { method: "POST" }
+      );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       await fetchYoutubeNarrative();
     } catch (err) {
@@ -185,8 +195,9 @@ export default function SocialPage() {
     setStrategicError(null);
     setStrategicLoading(true);
     try {
+      const base = `${getApiBase()}/social/sahi-strategic-brief?use_cache=${bypassCache ? "false" : "true"}`;
       const res = await fetch(
-        `${getApiBase()}/social/sahi-strategic-brief?use_cache=${bypassCache ? "false" : "true"}`
+        clientReady && activeClient ? withClientQuery(base, activeClient) : base
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: SahiStrategicBrief = await res.json();
@@ -199,7 +210,7 @@ export default function SocialPage() {
     } finally {
       setStrategicLoading(false);
     }
-  }, []);
+  }, [activeClient, clientReady]);
 
   useEffect(() => {
     fetchStrategicBrief(false);
@@ -208,7 +219,11 @@ export default function SocialPage() {
   const handleRefreshRedditTrending = async () => {
     setRedditRefreshing(true);
     try {
-      const res = await fetch(`${getApiBase()}/social/reddit-trending/refresh`, { method: "POST" });
+      const base = `${getApiBase()}/social/reddit-trending/refresh`;
+      const res = await fetch(
+        clientReady && activeClient ? withClientQuery(base, activeClient) : base,
+        { method: "POST" }
+      );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       await fetchRedditTrending();
     } catch (err) {
@@ -220,9 +235,10 @@ export default function SocialPage() {
   useEffect(() => {
     async function fetchPosts() {
       try {
-        const url = entityFilter
+        let url = entityFilter
           ? `${getApiBase()}/social/latest?entity=${encodeURIComponent(entityFilter)}`
           : `${getApiBase()}/social/latest`;
+        if (clientReady && activeClient) url = withClientQuery(url, activeClient);
         const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
@@ -235,7 +251,7 @@ export default function SocialPage() {
       }
     }
     fetchPosts();
-  }, [entityFilter]);
+  }, [entityFilter, activeClient, clientReady]);
 
   const suggestions = strategicBrief?.suggestions ?? [];
 

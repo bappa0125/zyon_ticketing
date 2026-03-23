@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { getApiBase } from "@/lib/api";
+import { getApiBase, withClientQuery } from "@/lib/api";
+import { useActiveClient } from "@/context/ClientContext";
 
 interface ForumMention {
   entity: string;
@@ -105,10 +106,10 @@ function BoldInline({ text }: { text: string }) {
 }
 
 export default function ForumMentionsPage() {
+  const { clientName, ready: clientReady } = useActiveClient();
   const [mentions, setMentions] = useState<ForumMention[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [entityFilter, setEntityFilter] = useState<string>("");
   const [count, setCount] = useState(0);
   const [topicsTraction, setTopicsTraction] = useState<ForumTopicTraction[]>([]);
   const [topicsLoading, setTopicsLoading] = useState(true);
@@ -123,7 +124,10 @@ export default function ForumMentionsPage() {
     try {
       const params = new URLSearchParams({ days: "7" });
       if (live) params.set("live", "true");
-      const res = await fetch(`${getApiBase()}/social/forum-theme-digest?${params}`);
+      const path = `${getApiBase()}/social/forum-theme-digest?${params}`;
+      const res = await fetch(
+        clientReady && clientName ? withClientQuery(path, clientName) : path
+      );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: { digest?: ForumThemeDigest; source?: string } = await res.json();
       setThemeDigest(data.digest ?? null);
@@ -135,12 +139,16 @@ export default function ForumMentionsPage() {
       setDigestLoading(false);
       setDigestRefreshing(false);
     }
-  }, []);
+  }, [clientName, clientReady]);
 
   const runDigestRefresh = useCallback(async () => {
     setDigestRefreshing(true);
     try {
-      const res = await fetch(`${getApiBase()}/social/forum-theme-digest/refresh`, { method: "POST" });
+      const base = `${getApiBase()}/social/forum-theme-digest/refresh`;
+      const res = await fetch(
+        clientReady && clientName ? withClientQuery(base, clientName) : base,
+        { method: "POST" }
+      );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       await fetchThemeDigest(false);
     } catch {
@@ -148,14 +156,18 @@ export default function ForumMentionsPage() {
     } finally {
       setDigestRefreshing(false);
     }
-  }, [fetchThemeDigest]);
+  }, [fetchThemeDigest, clientName, clientReady]);
 
   const fetchTopicsTraction = useCallback(async () => {
     setTopicsLoading(true);
     try {
       const params = new URLSearchParams({ range_days: "14", top_n: "15" });
-      if (entityFilter.trim()) params.set("client", entityFilter.trim());
-      const res = await fetch(`${getApiBase()}/social/forum-mentions/topics?${params}`);
+      const cn = clientName?.trim() ?? "";
+      if (clientReady && cn) params.set("client", cn);
+      const path = `${getApiBase()}/social/forum-mentions/topics?${params}`;
+      const res = await fetch(
+        clientReady && clientName ? withClientQuery(path, clientName) : path
+      );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: { topics?: ForumTopicTraction[] } = await res.json();
       setTopicsTraction(Array.isArray(data.topics) ? data.topics : []);
@@ -164,15 +176,19 @@ export default function ForumMentionsPage() {
     } finally {
       setTopicsLoading(false);
     }
-  }, [entityFilter]);
+  }, [clientName, clientReady]);
 
   const fetchMentions = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams({ limit: "80", range_days: "14" });
-      if (entityFilter.trim()) params.set("entity", entityFilter.trim());
-      const res = await fetch(`${getApiBase()}/social/forum-mentions?${params}`);
+      const cn = clientName?.trim() ?? "";
+      if (clientReady && cn) params.set("entity", cn);
+      const path = `${getApiBase()}/social/forum-mentions?${params}`;
+      const res = await fetch(
+        clientReady && clientName ? withClientQuery(path, clientName) : path
+      );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: { mentions?: ForumMention[]; count?: number } = await res.json();
       setMentions(Array.isArray(data.mentions) ? data.mentions : []);
@@ -185,7 +201,7 @@ export default function ForumMentionsPage() {
     } finally {
       setLoading(false);
     }
-  }, [entityFilter]);
+  }, [clientName, clientReady]);
 
   useEffect(() => {
     fetchMentions();
@@ -203,6 +219,14 @@ export default function ForumMentionsPage() {
     return acc;
   }, {});
   const sourceEntries = Object.entries(bySource).sort((a, b) => b[1] - a[1]).slice(0, 8);
+
+  if (!clientReady || !clientName) {
+    return (
+      <div className="app-page p-6">
+        <p className="text-sm text-[var(--ai-muted)]">Loading client…</p>
+      </div>
+    );
+  }
 
   return (
     <div className="app-page">
@@ -420,16 +444,9 @@ export default function ForumMentionsPage() {
         </section>
 
         <div className="flex flex-wrap items-center gap-4 mb-6">
-          <label className="flex items-center gap-2 text-sm text-[var(--ai-text-secondary)]">
-            <span>Entity filter</span>
-            <input
-              type="text"
-              value={entityFilter}
-              onChange={(e) => setEntityFilter(e.target.value)}
-              placeholder="e.g. Zerodha, Sahi"
-              className="rounded-lg border border-[var(--ai-border)] bg-[var(--ai-bg)] px-3 py-2 text-sm text-[var(--ai-text)] w-40"
-            />
-          </label>
+          <p className="text-sm text-[var(--ai-text-secondary)]">
+            Client / entity: <strong className="text-[var(--ai-text)]">{clientName}</strong>
+          </p>
           <button
             type="button"
             onClick={() => fetchMentions()}

@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { getApiBase } from "@/lib/api";
+import { getApiBase, withClientQuery } from "@/lib/api";
+import { useActiveClient } from "@/context/ClientContext";
 
 interface PackMeta {
   client?: string;
@@ -229,7 +230,7 @@ function MentionTrendBlock({
 }
 
 export function NarrativeBriefingView({ showReportsTabsHint = false }: { showReportsTabsHint?: boolean }) {
-  const [client, setClient] = useState("Sahi");
+  const { clientName: client, ready: clientReady } = useActiveClient();
   const [rangeDays, setRangeDays] = useState(30);
   const [pack, setPack] = useState<{
     meta?: PackMeta;
@@ -246,14 +247,22 @@ export function NarrativeBriefingView({ showReportsTabsHint = false }: { showRep
   const [trendTzNote, setTrendTzNote] = useState<string>("");
 
   const load = useCallback(async () => {
+    const c = client?.trim() ?? "";
+    if (!clientReady || !c) {
+      setPack(null);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setErr(null);
     try {
       const q = new URLSearchParams({
-        client: client.trim() || "Sahi",
+        client: c,
         range_days: String(rangeDays),
       });
-      const res = await fetch(`${getApiBase()}/social/narrative-briefing-pack?${q}`);
+      const res = await fetch(
+        withClientQuery(`${getApiBase()}/social/narrative-briefing-pack?${q}`, c)
+      );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setPack(await res.json());
     } catch (e) {
@@ -262,7 +271,7 @@ export function NarrativeBriefingView({ showReportsTabsHint = false }: { showRep
     } finally {
       setLoading(false);
     }
-  }, [client, rangeDays]);
+  }, [client, rangeDays, clientReady]);
 
   useEffect(() => {
     load();
@@ -271,10 +280,19 @@ export function NarrativeBriefingView({ showReportsTabsHint = false }: { showRep
   useEffect(() => {
     let cancelled = false;
     async function loadTrends() {
+      const c = client?.trim() ?? "";
+      if (!clientReady || !c) {
+        setTrendSeries([]);
+        setTrendTzNote("");
+        setTrendLoading(false);
+        return;
+      }
       setTrendLoading(true);
       try {
-        const q = new URLSearchParams({ client: client.trim() || "Sahi", days: "7" });
-        const res = await fetch(`${getApiBase()}/social/narrative-briefing-trends?${q}`);
+        const q = new URLSearchParams({ client: c, days: "7" });
+        const res = await fetch(
+          withClientQuery(`${getApiBase()}/social/narrative-briefing-trends?${q}`, c)
+        );
         const data = await res.json();
         if (!cancelled) {
           setTrendSeries(Array.isArray(data.series) ? data.series : []);
@@ -298,7 +316,7 @@ export function NarrativeBriefingView({ showReportsTabsHint = false }: { showRep
     return () => {
       cancelled = true;
     };
-  }, [client]);
+  }, [client, clientReady]);
 
   const meta = pack?.meta;
   const surface = pack?.surface_totals || {};
@@ -351,6 +369,16 @@ export function NarrativeBriefingView({ showReportsTabsHint = false }: { showRep
 
   const links = pack?.deep_links || {};
 
+  if (!clientReady || !client) {
+    return (
+      <div className="app-page">
+        <div className="max-w-5xl mx-auto p-6">
+          <p className="text-[var(--ai-muted)]">Loading client…</p>
+        </div>
+      </div>
+    );
+  }
+
   if (loading && !pack) {
     return (
       <div className="app-page">
@@ -395,14 +423,9 @@ export function NarrativeBriefingView({ showReportsTabsHint = false }: { showRep
         </header>
 
         <div className="flex flex-wrap items-end gap-4 p-4 rounded-xl border border-[var(--ai-border)] bg-[var(--ai-surface)] mb-6">
-          <label className="flex flex-col gap-1 text-xs text-[var(--ai-muted)]">
-            Client
-            <input
-              value={client}
-              onChange={(e) => setClient(e.target.value)}
-              className="px-3 py-2 rounded-lg border border-[var(--ai-border)] bg-[var(--ai-bg)] text-[var(--ai-text)] text-sm w-36"
-            />
-          </label>
+          <p className="text-xs text-[var(--ai-muted)] pb-2">
+            Client: <strong className="text-[var(--ai-text)]">{client}</strong>
+          </p>
           <label className="flex flex-col gap-1 text-xs text-[var(--ai-muted)]">
             Snapshot window
             <select

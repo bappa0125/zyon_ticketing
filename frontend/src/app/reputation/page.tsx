@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { getApiBase } from "@/lib/api";
+import { getApiBase, withClientQuery } from "@/lib/api";
+import { useActiveClient } from "@/context/ClientContext";
 
 const RANGE_OPTIONS = [
   { value: "24h", label: "24h" },
@@ -21,40 +22,19 @@ interface ReputationResponse {
 }
 
 export default function ReputationPage() {
-  const [clients, setClients] = useState<{ name: string }[]>([]);
-  const [client, setClient] = useState<string>("");
+  const { clientName: client, ready: clientReady } = useActiveClient();
   const [range, setRange] = useState<RangeValue>("7d");
-  const [loadingClients, setLoadingClients] = useState(true);
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<ReputationResponse | null>(null);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch(`${getApiBase()}/clients`);
-        if (!res.ok) throw new Error("clients failed");
-        const json = await res.json();
-        const list = json.clients ?? [];
-        setClients(list);
-        if (list.length > 0 && !client) setClient(list[0].name);
-      } catch (e) {
-        console.error(e);
-        setClients([]);
-      } finally {
-        setLoadingClients(false);
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const downloadUrl = useMemo(() => {
-    if (!client.trim()) return "";
+    if (!client?.trim()) return "";
     const params = new URLSearchParams({ client: client.trim(), range });
     return `${getApiBase()}/reports/reputation.html?${params.toString()}`;
   }, [client, range]);
 
   useEffect(() => {
-    if (!client.trim()) {
+    if (!clientReady || !client?.trim()) {
       setData(null);
       return;
     }
@@ -63,7 +43,9 @@ export default function ReputationPage() {
     (async () => {
       try {
         const params = new URLSearchParams({ client: client.trim(), range });
-        const res = await fetch(`${getApiBase()}/reports/reputation?${params.toString()}`);
+        const res = await fetch(
+          withClientQuery(`${getApiBase()}/reports/reputation?${params.toString()}`, client)
+        );
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = (await res.json()) as ReputationResponse;
         if (!cancelled) setData(json);
@@ -77,7 +59,17 @@ export default function ReputationPage() {
     return () => {
       cancelled = true;
     };
-  }, [client, range]);
+  }, [client, range, clientReady]);
+
+  if (!clientReady || !client) {
+    return (
+      <div className="app-page">
+        <div className="max-w-6xl mx-auto p-6">
+          <p className="text-sm text-zinc-500">Loading client…</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="app-page">
@@ -86,29 +78,10 @@ export default function ReputationPage() {
           <div>
             <h1 className="text-xl font-semibold text-zinc-100">Reputation & Sentiment</h1>
             <p className="text-sm text-zinc-500 mt-1">
-              Download a printable brief: sentiment mix + negative drivers.
+              Client: <strong className="text-zinc-300">{client}</strong> · Download a printable brief: sentiment mix + negative drivers.
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <select
-              value={client}
-              onChange={(e) => setClient(e.target.value)}
-              disabled={loadingClients}
-              className="px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-200 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-600 min-w-[160px]"
-            >
-              {loadingClients ? (
-                <option value="">Loading…</option>
-              ) : (
-                <>
-                  <option value="">Select client</option>
-                  {clients.map((c) => (
-                    <option key={c.name} value={c.name}>
-                      {c.name}
-                    </option>
-                  ))}
-                </>
-              )}
-            </select>
             <select
               value={range}
               onChange={(e) => setRange(e.target.value as RangeValue)}
@@ -136,7 +109,7 @@ export default function ReputationPage() {
           </div>
         </header>
 
-        {!client.trim() && (
+        {!client?.trim() && (
           <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-8 text-center text-zinc-500">
             Select a client to view the reputation dashboard.
           </div>

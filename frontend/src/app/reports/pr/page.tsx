@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { getApiBase } from "@/lib/api";
+import { getApiBase, withClientQuery } from "@/lib/api";
+import { useActiveClient } from "@/context/ClientContext";
 import { ShareOfVoiceChart } from "@/components/MediaIntelligence/ShareOfVoiceChart";
 import { PRSummaryCard } from "@/components/MediaIntelligence/PRSummaryCard";
 import { CoverageByDomain, type DomainRow } from "@/components/MediaIntelligence/CoverageByDomain";
@@ -43,8 +44,7 @@ function last7Days(): { from: string; to: string } {
 }
 
 export default function ReportsPage() {
-  const [clients, setClients] = useState<string[]>([]);
-  const [client, setClient] = useState("");
+  const { clientName: client, ready: clientReady } = useActiveClient();
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [tab, setTab] = useState<TabId>("overview");
@@ -64,22 +64,6 @@ export default function ReportsPage() {
     setToDate(to);
   }, []);
 
-  useEffect(() => {
-    async function fetchClients() {
-      try {
-        const res = await fetch(`${getApiBase()}/pr-reports/clients`);
-        if (!res.ok) return;
-        const json = await res.json();
-        const list = json.clients ?? [];
-        setClients(list);
-        if (list.length > 0 && !client) setClient(list[0]);
-      } catch {
-        setClients([]);
-      }
-    }
-    fetchClients();
-  }, []);
-
   const rangeParam = useCallback(() => {
     if (!fromDate || !toDate) return "7d";
     const d1 = new Date(fromDate).getTime();
@@ -91,11 +75,13 @@ export default function ReportsPage() {
   }, [fromDate, toDate]);
 
   const fetchSnapshots = useCallback(async () => {
-    if (!client.trim() || !fromDate || !toDate) return;
+    if (!clientReady || !client?.trim() || !fromDate || !toDate) return;
     setLoadingSnapshots(true);
     try {
       const params = new URLSearchParams({ client, from_date: fromDate, to_date: toDate });
-      const res = await fetch(`${getApiBase()}/pr-reports/snapshots?${params}`);
+      const res = await fetch(
+        withClientQuery(`${getApiBase()}/pr-reports/snapshots?${params}`, client)
+      );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setSnapshots(data.snapshots ?? []);
@@ -105,16 +91,19 @@ export default function ReportsPage() {
     } finally {
       setLoadingSnapshots(false);
     }
-  }, [client, fromDate, toDate]);
+  }, [client, fromDate, toDate, clientReady]);
 
   const fetchDashboard = useCallback(async () => {
-    if (!client.trim()) return;
+    if (!clientReady || !client?.trim()) return;
     setLoadingDashboard(true);
     try {
       const params = new URLSearchParams({ client, range: rangeParam() });
-      const res = await fetch(`${getApiBase()}/media-intelligence/dashboard?${params}`, {
-        cache: "no-store",
-      });
+      const res = await fetch(
+        withClientQuery(`${getApiBase()}/media-intelligence/dashboard?${params}`, client),
+        {
+          cache: "no-store",
+        }
+      );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
       setDashboardData(json);
@@ -124,15 +113,25 @@ export default function ReportsPage() {
     } finally {
       setLoadingDashboard(false);
     }
-  }, [client, rangeParam]);
+  }, [client, rangeParam, clientReady]);
 
   const fetchPressReleasesAndPickups = useCallback(async () => {
-    if (!client.trim()) return;
+    if (!clientReady || !client?.trim()) return;
     setLoadingPR(true);
     try {
       const [relRes, pickRes] = await Promise.all([
-        fetch(`${getApiBase()}/pr-reports/press-releases?client=${encodeURIComponent(client)}`),
-        fetch(`${getApiBase()}/pr-reports/press-release-pickups?client=${encodeURIComponent(client)}`),
+        fetch(
+          withClientQuery(
+            `${getApiBase()}/pr-reports/press-releases?client=${encodeURIComponent(client)}`,
+            client
+          )
+        ),
+        fetch(
+          withClientQuery(
+            `${getApiBase()}/pr-reports/press-release-pickups?client=${encodeURIComponent(client)}`,
+            client
+          )
+        ),
       ]);
       if (relRes.ok) {
         const j = await relRes.json();
@@ -147,24 +146,35 @@ export default function ReportsPage() {
     } finally {
       setLoadingPR(false);
     }
-  }, [client]);
+  }, [client, clientReady]);
 
   useEffect(() => {
-    if (client.trim()) {
+    if (clientReady && client?.trim()) {
       fetchSnapshots();
       fetchDashboard();
       fetchPressReleasesAndPickups();
     }
-  }, [client, fromDate, toDate, fetchSnapshots, fetchDashboard, fetchPressReleasesAndPickups]);
+  }, [client, fromDate, toDate, fetchSnapshots, fetchDashboard, fetchPressReleasesAndPickups, clientReady]);
 
   const handleExport = () => {
-    if (!client.trim() || !fromDate || !toDate) return;
-    const u = `${getApiBase()}/pr-reports/export/html?client=${encodeURIComponent(client)}&from_date=${fromDate}&to_date=${toDate}`;
+    if (!client?.trim() || !fromDate || !toDate) return;
+    const u = withClientQuery(
+      `${getApiBase()}/pr-reports/export/html?client=${encodeURIComponent(client)}&from_date=${fromDate}&to_date=${toDate}`,
+      client
+    );
     window.open(u, "_blank", "noopener");
   };
 
   const entities = dashboardData ? [dashboardData.client, ...(dashboardData.competitors || [])] : [];
   const totalMentions = dashboardData?.coverage?.reduce((s, c) => s + c.mentions, 0) ?? 0;
+
+  if (!clientReady || !client) {
+    return (
+      <div className="app-page p-6">
+        <p className="text-sm text-[var(--ai-muted)]">Loading client…</p>
+      </div>
+    );
+  }
 
   const tabs: { id: TabId; label: string }[] = [
     { id: "overview", label: "Overview" },
@@ -186,18 +196,9 @@ export default function ReportsPage() {
         </header>
 
         <section className="flex flex-wrap items-center gap-4 mb-6 p-4 rounded-xl border border-[var(--ai-border)] bg-[var(--ai-surface)]">
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-[var(--ai-muted)]">Client</label>
-            <select
-              value={client}
-              onChange={(e) => setClient(e.target.value)}
-              className="px-3 py-2 rounded-lg bg-[var(--ai-bg-elevated)] border border-[var(--ai-border)] text-[var(--ai-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ai-accent)] min-w-[160px]"
-            >
-              <option value="">Select client</option>
-              {clients.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
+          <div className="flex items-center gap-2 text-sm text-[var(--ai-muted)]">
+            <span>Client</span>
+            <span className="font-semibold text-[var(--ai-text)]">{client}</span>
           </div>
           <div className="flex items-center gap-2">
             <label className="text-sm text-[var(--ai-muted)]">From</label>
@@ -220,7 +221,7 @@ export default function ReportsPage() {
           <button
             type="button"
             onClick={handleExport}
-            disabled={!client.trim() || !fromDate || !toDate}
+            disabled={!client?.trim() || !fromDate || !toDate}
             className="px-4 py-2 rounded-lg bg-[var(--ai-accent)] text-[var(--ai-bg)] font-medium text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Export HTML
@@ -244,7 +245,7 @@ export default function ReportsPage() {
           ))}
         </div>
 
-        {!client.trim() && (
+        {!client?.trim() && (
           <div className="rounded-xl border border-[var(--ai-border)] bg-[var(--ai-surface)] p-8 text-center text-[var(--ai-muted)]">
             Select a client to view PR reports.
           </div>

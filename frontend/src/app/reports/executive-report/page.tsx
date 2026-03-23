@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useState, useEffect, useCallback } from "react";
-import { getApiBase } from "@/lib/api";
+import { getApiBase, withClientQuery } from "@/lib/api";
+import { useActiveClient } from "@/context/ClientContext";
 
 interface ReportMeta {
   period?: string;
@@ -91,6 +92,7 @@ interface ReportPayload {
 const POPULATE_TIMEOUT_MS = 900_000; // 15 min for Narrative Positioning + AI Brief + PR Opportunities
 
 export default function ExecutiveReportPage() {
+  const { clientName, ready: clientReady } = useActiveClient();
   const [report, setReport] = useState<ReportPayload | null>(null);
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -100,6 +102,10 @@ export default function ExecutiveReportPage() {
   const [populateMessage, setPopulateMessage] = useState<string | null>(null);
 
   const fetchReport = useCallback(async (refresh = false) => {
+    if (!clientReady) {
+      setLoading(false);
+      return;
+    }
     if (refresh) setRefreshing(true);
     else setLoading(true);
     if (!refresh) setError(null);
@@ -107,7 +113,8 @@ export default function ExecutiveReportPage() {
     const controller = new AbortController();
     const timeoutId = refresh ? window.setTimeout(() => controller.abort(), REPORT_TIMEOUT_MS) : undefined;
     try {
-      const url = `${getApiBase()}/reports/executive-competitor?range=7d${refresh ? "&refresh=true" : ""}`;
+      const base = `${getApiBase()}/reports/executive-competitor?range=7d${refresh ? "&refresh=true" : ""}`;
+      const url = clientName ? withClientQuery(base, clientName) : base;
       const res = await fetch(url, { signal: controller.signal });
       const text = await res.text();
       if (res.status === 502) {
@@ -158,7 +165,7 @@ export default function ExecutiveReportPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [clientName, clientReady]);
 
   const populateData = useCallback(async () => {
     setPopulating(true);
@@ -166,7 +173,8 @@ export default function ExecutiveReportPage() {
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), POPULATE_TIMEOUT_MS);
     try {
-      const res = await fetch(`${getApiBase()}/reports/executive-competitor/populate`, {
+      const base = `${getApiBase()}/reports/executive-competitor/populate`;
+      const res = await fetch(clientName ? withClientQuery(base, clientName) : base, {
         method: "POST",
         signal: controller.signal,
       });
@@ -184,11 +192,21 @@ export default function ExecutiveReportPage() {
       window.clearTimeout(timeoutId);
       setPopulating(false);
     }
-  }, []);
+  }, [clientName]);
 
   useEffect(() => {
-    fetchReport();
-  }, [fetchReport]);
+    if (clientReady) fetchReport();
+  }, [fetchReport, clientReady]);
+
+  if (!clientReady) {
+    return (
+      <div className="app-page">
+        <div className="max-w-5xl mx-auto p-6">
+          <p className="text-[var(--ai-muted)]">Loading client…</p>
+        </div>
+      </div>
+    );
+  }
 
   if (loading && !report) {
     return (

@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useRef, useEffect } from "react";
+import { useActiveClient } from "@/context/ClientContext";
+import { ClientSwitcher } from "./ClientSwitcher";
 
 type NavLink = { href: string; label: string };
 type NavGroup = { label: string; items: NavLink[] };
@@ -66,7 +68,15 @@ function isGroupActive(pathname: string, group: NavGroup): boolean {
   return group.items.some((l) => isActive(pathname, l.href));
 }
 
+function socialGroupItems(group: NavGroup, showForums: boolean): NavLink[] {
+  if (group.label !== "Social") return group.items;
+  if (showForums) return group.items;
+  return group.items.filter((l) => l.href !== "/social/forums");
+}
+
 export function AppNav() {
+  const { activeClient, ready } = useActiveClient();
+  const showForums = !ready || activeClient?.features.forums !== false;
   const pathname = usePathname() || "/";
   const [mobileOpen, setMobileOpen] = useState(false);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
@@ -93,7 +103,7 @@ export function AppNav() {
       className="sticky top-0 z-30 overflow-visible ai-glass border-b border-[var(--ai-border)] transition-shadow duration-300"
       style={{ minHeight: "var(--ai-nav-height)" }}
     >
-      <div className="relative mx-auto flex h-14 max-w-[var(--ai-max-content)] items-center justify-between gap-4 px-4 md:h-[var(--ai-nav-height)] md:px-6">
+      <div className="relative mx-auto flex h-14 max-w-[var(--ai-max-content)] items-center justify-between gap-3 px-4 md:h-[var(--ai-nav-height)] md:gap-4 md:px-6">
         <Link
           href="/"
           className="nav-logo shrink-0 text-lg font-bold tracking-tight text-[var(--ai-text)] transition-colors duration-200 hover:text-[var(--ai-accent)]"
@@ -104,6 +114,8 @@ export function AppNav() {
           </span>
         </Link>
 
+        <ClientSwitcher />
+
         {/* Desktop: grouped nav with dropdowns */}
         <nav
           ref={navRef}
@@ -113,7 +125,8 @@ export function AppNav() {
           <ul className="flex items-center justify-center gap-0.5 py-2 lg:gap-1 overflow-visible">
             {NAV_STRUCTURE.map((item) => {
               if (isGroup(item)) {
-                const active = isGroupActive(pathname, item);
+                const groupLinks = socialGroupItems(item, showForums);
+                const active = groupLinks.some((l) => isActive(pathname, l.href));
                 const isOpen = openDropdown === item.label;
                 return (
                   <li key={item.label} className="relative shrink-0">
@@ -150,7 +163,7 @@ export function AppNav() {
                         className="absolute left-1/2 top-full z-[100] mt-1 min-w-[10rem] -translate-x-1/2 rounded-xl border border-[var(--ai-border)] bg-[var(--ai-surface)] py-1 shadow-xl whitespace-nowrap"
                         role="menu"
                       >
-                        {item.items.map((link) => {
+                        {groupLinks.map((link) => {
                           const linkActive = isActive(pathname, link.href);
                           return (
                             <Link
@@ -243,13 +256,14 @@ export function AppNav() {
             >
               {NAV_STRUCTURE.map((item) => {
                 if (isGroup(item)) {
+                  const groupLinks = socialGroupItems(item, showForums);
                   return (
                     <li key={item.label} className="col-span-2 sm:col-span-3 pt-2 first:pt-0">
                       <p className="text-xs font-semibold uppercase tracking-wider text-[var(--ai-muted)] px-2 mb-1.5">
                         {item.label}
                       </p>
                       <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                        {item.items.map((link) => {
+                        {groupLinks.map((link) => {
                           const active = isActive(pathname, link.href);
                           return (
                             <li key={link.href}>

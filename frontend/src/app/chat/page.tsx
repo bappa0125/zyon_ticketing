@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { ChatSidebar } from "@/components/ChatSidebar";
 import { ChatMessage } from "@/components/ChatMessage";
 import { ChatInput } from "@/components/ChatInput";
-import { getApiBase } from "@/lib/api";
+import { getApiBase, withClientQuery } from "@/lib/api";
+import { useActiveClient, type ClientRow } from "@/context/ClientContext";
 
 export type HintType = "mentions" | "coverage" | "narrative" | "sentiment";
 
@@ -38,12 +39,11 @@ function parseStepLine(line: string): PipelineStep | null {
   return null;
 }
 
-function buildSuggestedHints(clients: { name: string; competitors?: string[] }[]): SuggestedHint[] {
+function buildSuggestedHints(row: ClientRow | null): SuggestedHint[] {
   const hints: SuggestedHint[] = [];
-  const first = clients[0];
-  if (!first?.name) return [];
-  const clientName = first.name.trim();
-  const competitors = first.competitors ?? [];
+  if (!row?.name) return [];
+  const clientName = row.name.trim();
+  const competitors = row.competitors ?? [];
   const entities = [clientName, ...competitors].filter(Boolean).slice(0, 3);
 
   if (entities[0]) {
@@ -62,6 +62,7 @@ function buildSuggestedHints(clients: { name: string; competitors?: string[] }[]
 }
 
 export default function ChatPage() {
+  const { activeClient, ready: clientReady } = useActiveClient();
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<{ role: string; content: string }[]>([]);
   const [conversations, setConversations] = useState<{ id: string; title: string }[]>([]);
@@ -74,32 +75,20 @@ export default function ChatPage() {
   const [liveSearchButtonBusy, setLiveSearchButtonBusy] = useState(false);
   const lastSearchQueryRef = useRef<string>("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const [clients, setClients] = useState<{ name: string; competitors?: string[] }[]>([]);
-
-  const suggestedHints = useMemo(() => buildSuggestedHints(clients), [clients]);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(`${getApiBase()}/clients`);
-        if (!res.ok || cancelled) return;
-        const data = await res.json();
-        if (!cancelled && data.clients?.length) {
-          setClients(data.clients);
-        }
-      } catch {
-        // keep default empty
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
+  const suggestedHints = useMemo(
+    () => (clientReady ? buildSuggestedHints(activeClient) : []),
+    [activeClient, clientReady]
+  );
 
   const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
 
-  const createNewChat = async () => {
+  const createNewChat = useCallback(async () => {
     try {
-      const res = await fetch(`${getApiBase()}/new-chat`, { method: "POST" });
+      const base = `${getApiBase()}/new-chat`;
+      const res = await fetch(
+        clientReady && activeClient?.name ? withClientQuery(base, activeClient.name) : base,
+        { method: "POST" }
+      );
       if (!res.ok) {
         const errText = await res.text();
         throw new Error(errText || `HTTP ${res.status}`);
@@ -118,18 +107,22 @@ export default function ChatPage() {
         },
       ]);
     }
-  };
+  }, [clientReady, activeClient?.name]);
 
   const loadHistory = async (convId: string) => {
-    const res = await fetch(`${getApiBase()}/history/${convId}`);
+    const base = `${getApiBase()}/history/${convId}`;
+    const res = await fetch(
+      clientReady && activeClient?.name ? withClientQuery(base, activeClient.name) : base
+    );
     const data = await res.json();
     setConversationId(convId);
     setMessages(data.messages.map((m: { role: string; content: string }) => ({ role: m.role, content: m.content })));
   };
 
   useEffect(() => {
+    if (!clientReady) return;
     createNewChat();
-  }, []);
+  }, [clientReady, createNewChat]);
 
   useEffect(() => {
     scrollToBottom();
@@ -157,7 +150,11 @@ export default function ChatPage() {
     }
 
     try {
-      const res = await fetch(`${getApiBase()}/chat`, {
+      const chatUrl =
+        clientReady && activeClient?.name
+          ? withClientQuery(`${getApiBase()}/chat`, activeClient.name)
+          : `${getApiBase()}/chat`;
+      const res = await fetch(chatUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

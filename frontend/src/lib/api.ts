@@ -10,3 +10,21 @@ export function getApiBase(): string {
   const base = (env && env.trim()) ? String(env).replace(/\/$/, "") : "/api";
   return base;
 }
+
+/** localStorage key — must match ClientContext */
+export const ZYON_CLIENT_STORAGE_KEY = "zyon_active_client";
+
+/**
+ * Set or replace `client` on a path that may already have a query string.
+ * Use for GETs so the active UI client is always sent to the API.
+ */
+export function withClientQuery(pathWithOptionalQuery: string, client: string | null | undefined): string {
+  const trimmed = (client ?? "").trim();
+  if (!trimmed) return pathWithOptionalQuery;
+  const qIdx = pathWithOptionalQuery.indexOf("?");
+  const path = qIdx === -1 ? pathWithOptionalQuery : pathWithOptionalQuery.slice(0, qIdx);
+  const raw = qIdx === -1 ? "" : pathWithOptionalQuery.slice(qIdx + 1);
+  const params = new URLSearchParams(raw);
+  params.set("client", trimmed);
+  return `${path}?${params.toString()}`;
+}

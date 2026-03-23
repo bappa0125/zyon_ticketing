@@ -15,6 +15,19 @@ logger = get_logger(__name__)
 CLIENTS_CONFIG_KEY = "clients_config"
 CACHE_TTL = 300
 
+# UI + ingestion routing: defaults keep legacy behaviour when YAML omits profile fields.
+DEFAULT_VERTICAL = "corporate_pr"
+ALLOWED_VERTICALS = frozenset({"corporate_pr", "trading", "political"})
+
+DEFAULT_FEATURES: dict[str, Any] = {
+    "forums": True,
+    "youtube": True,
+    "reddit": True,
+    "twitter": True,
+    "twitter_schema": "legacy",
+}
+ALLOWED_TWITTER_SCHEMAS = frozenset({"legacy", "political"})
+
 
 def _competitor_name(comp: Any) -> str:
     """Return canonical competitor name; supports string or dict with 'name'."""
@@ -47,6 +60,34 @@ def get_competitor_names(client_obj: dict[str, Any]) -> list[str]:
     if not isinstance(competitors, list):
         return []
     return [n for c in competitors if (n := _competitor_name(c))]
+
+
+def normalize_vertical(raw: Any) -> str:
+    s = (raw or "").strip().lower() if isinstance(raw, str) else ""
+    if s in ALLOWED_VERTICALS:
+        return s
+    return DEFAULT_VERTICAL
+
+
+def normalize_features(raw: Any) -> dict[str, Any]:
+    out = dict(DEFAULT_FEATURES)
+    if not isinstance(raw, dict):
+        return out
+    for key in ("forums", "youtube", "reddit", "twitter"):
+        if key in raw and isinstance(raw[key], bool):
+            out[key] = raw[key]
+    ts = raw.get("twitter_schema")
+    if isinstance(ts, str) and ts.strip().lower() in ALLOWED_TWITTER_SCHEMAS:
+        out["twitter_schema"] = ts.strip().lower()
+    return out
+
+
+def get_client_profile(client_obj: dict[str, Any]) -> dict[str, Any]:
+    """Resolved vertical + feature flags for API and workers (YAML may omit keys)."""
+    return {
+        "vertical": normalize_vertical(client_obj.get("vertical")),
+        "features": normalize_features(client_obj.get("features")),
+    }
 
 
 def _get_config_dir() -> Path:

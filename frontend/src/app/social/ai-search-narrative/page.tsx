@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { getApiBase } from "@/lib/api";
+import { getApiBase, withClientQuery } from "@/lib/api";
+import { useActiveClient } from "@/context/ClientContext";
 
 interface GroupMetric {
   group_id: string;
@@ -53,8 +54,7 @@ const body = "text-[var(--ai-text-secondary)]";
 const SAMPLE_ANSWER_PREVIEW = 180;
 
 export default function AiSearchVisibilityPage() {
-  const [clientFilter, setClientFilter] = useState<string>("Sahi");
-  const [clients, setClients] = useState<string[]>([]);
+  const { clientName: clientFilter, ready: clientReady } = useActiveClient();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -64,7 +64,7 @@ export default function AiSearchVisibilityPage() {
   const [expandedSampleIndex, setExpandedSampleIndex] = useState<number | null>(null);
 
   const fetchDashboard = useCallback(async () => {
-    if (!clientFilter.trim()) {
+    if (!clientReady || !clientFilter?.trim()) {
       setData(null);
       setLoading(false);
       return;
@@ -73,7 +73,10 @@ export default function AiSearchVisibilityPage() {
     setLoading(true);
     try {
       const res = await fetch(
-        `${getApiBase()}/social/ai-search-visibility/dashboard?client=${encodeURIComponent(clientFilter)}&weeks=${Math.min(weeks, 52)}`
+        withClientQuery(
+          `${getApiBase()}/social/ai-search-visibility/dashboard?client=${encodeURIComponent(clientFilter)}&weeks=${Math.min(weeks, 52)}`,
+          clientFilter
+        )
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
@@ -84,23 +87,7 @@ export default function AiSearchVisibilityPage() {
     } finally {
       setLoading(false);
     }
-  }, [clientFilter, weeks]);
-
-  useEffect(() => {
-    async function loadClients() {
-      try {
-        const res = await fetch(`${getApiBase()}/clients`);
-        if (!res.ok) return;
-        const j = await res.json();
-        const list = j.clients?.map((c: { name?: string }) => c.name).filter(Boolean) ?? [];
-        setClients(list);
-        if (list.length && !clientFilter) setClientFilter(list[0]);
-      } catch {
-        setClients(["Sahi"]);
-      }
-    }
-    loadClients();
-  }, []);
+  }, [clientFilter, weeks, clientReady]);
 
   useEffect(() => {
     fetchDashboard();
@@ -136,6 +123,16 @@ export default function AiSearchVisibilityPage() {
     }
   };
 
+  if (!clientReady || !clientFilter) {
+    return (
+      <div className="app-page">
+        <div className="mx-auto w-full max-w-[var(--ai-max-content)] p-6">
+          <p className={muted}>Loading client…</p>
+        </div>
+      </div>
+    );
+  }
+
   if (loading) {
     return (
       <div className="app-page">
@@ -161,16 +158,9 @@ export default function AiSearchVisibilityPage() {
         </p>
 
         <div className="flex flex-wrap items-center gap-3 mb-6">
-          <label className="text-sm font-medium text-[var(--ai-text-secondary)]">Client:</label>
-          <select
-            value={clientFilter}
-            onChange={(e) => setClientFilter(e.target.value)}
-            className="rounded-lg border border-[var(--ai-border)] bg-[var(--ai-surface)] px-3 py-2 text-sm text-[var(--ai-text)]"
-          >
-            {clients.map((c) => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-          </select>
+          <p className="text-sm font-medium text-[var(--ai-text-secondary)]">
+            Client: <span className="text-[var(--ai-text)]">{clientFilter}</span>
+          </p>
           <label className="text-sm font-medium text-[var(--ai-text-secondary)]">Trend weeks:</label>
           <select
             value={weeks}

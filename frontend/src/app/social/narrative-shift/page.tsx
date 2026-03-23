@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { getApiBase } from "@/lib/api";
+import { getApiBase, withClientQuery } from "@/lib/api";
+import { useActiveClient } from "@/context/ClientContext";
 
 interface DailyReport {
   date: string;
@@ -91,6 +92,7 @@ function buildReportHtml(reports: DailyReport[]): string {
 }
 
 export default function NarrativeShiftPage() {
+  const { clientName: client, ready: clientReady } = useActiveClient();
   const [data, setData] = useState<NarrativeShiftData | null>(null);
   const [dailyReports, setDailyReports] = useState<DailyReport[]>([]);
   const [loading, setLoading] = useState(true);
@@ -100,7 +102,8 @@ export default function NarrativeShiftPage() {
   const fetchData = useCallback(async () => {
     setError(null);
     try {
-      const res = await fetch(`${getApiBase()}/social/narrative-shift`);
+      const base = `${getApiBase()}/social/narrative-shift`;
+      const res = await fetch(clientReady && client ? withClientQuery(base, client) : base);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
       setData({
@@ -116,14 +119,15 @@ export default function NarrativeShiftPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [client, clientReady]);
 
   const [dailyError, setDailyError] = useState<string | null>(null);
 
   const fetchDailyReports = useCallback(async () => {
     setDailyError(null);
     try {
-      const res = await fetch(`${getApiBase()}/social/narrative-intelligence-daily?days=7`);
+      const base = `${getApiBase()}/social/narrative-intelligence-daily?days=7`;
+      const res = await fetch(clientReady && client ? withClientQuery(base, client) : base);
       if (!res.ok) {
         const text = await res.text();
         throw new Error(`HTTP ${res.status}${text ? `: ${text.slice(0, 150)}` : ""}`);
@@ -136,7 +140,7 @@ export default function NarrativeShiftPage() {
     } finally {
       setDailyLoading(false);
     }
-  }, []);
+  }, [client, clientReady]);
 
   useEffect(() => {
     fetchData();

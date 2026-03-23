@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { getApiBase } from "@/lib/api";
+import { getApiBase, withClientQuery } from "@/lib/api";
+import { useActiveClient } from "@/context/ClientContext";
 
 interface ContentSuggestion {
   place: string;
@@ -63,16 +64,15 @@ const body = "text-[var(--ai-text-secondary)]";
 const primaryText = "text-[var(--ai-text)]";
 
 export default function NarrativeIntelligencePage() {
+  const { clientName: clientFilter, ready: clientReady } = useActiveClient();
   const [reports, setReports] = useState<PositioningReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [runningBatch, setRunningBatch] = useState(false);
-  const [clientFilter, setClientFilter] = useState<string>("Sahi");
-  const [clients, setClients] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [evidenceOpen, setEvidenceOpen] = useState(false);
 
   const fetchReports = useCallback(async () => {
-    if (!clientFilter.trim()) {
+    if (!clientReady || !clientFilter?.trim()) {
       setReports([]);
       setLoading(false);
       return;
@@ -81,7 +81,10 @@ export default function NarrativeIntelligencePage() {
     setLoading(true);
     try {
       const res = await fetch(
-        `${getApiBase()}/social/narrative-positioning?client=${encodeURIComponent(clientFilter)}&days=7`
+        withClientQuery(
+          `${getApiBase()}/social/narrative-positioning?client=${encodeURIComponent(clientFilter)}&days=7`,
+          clientFilter
+        )
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
@@ -92,24 +95,7 @@ export default function NarrativeIntelligencePage() {
     } finally {
       setLoading(false);
     }
-  }, [clientFilter]);
-
-  useEffect(() => {
-    async function loadClients() {
-      try {
-        const res = await fetch(`${getApiBase()}/clients`);
-        if (!res.ok) return;
-        const j = await res.json();
-        const list =
-          j.clients?.map((c: { name?: string }) => c.name).filter(Boolean) ?? [];
-        setClients(list);
-        if (list.length && !clientFilter) setClientFilter(list[0]);
-      } catch {
-        setClients(["Sahi"]);
-      }
-    }
-    loadClients();
-  }, []);
+  }, [clientFilter, clientReady]);
 
   useEffect(() => {
     fetchReports();
@@ -122,9 +108,13 @@ export default function NarrativeIntelligencePage() {
     setError(null);
     setBatchMessage(null);
     try {
-      const res = await fetch(`${getApiBase()}/social/narrative-positioning/run-batch`, {
-        method: "POST",
-      });
+      const base = `${getApiBase()}/social/narrative-positioning/run-batch`;
+      const res = await fetch(
+        clientReady && clientFilter ? withClientQuery(base, clientFilter) : base,
+        {
+          method: "POST",
+        }
+      );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (data.ok) {
@@ -143,6 +133,16 @@ export default function NarrativeIntelligencePage() {
   };
 
   const latest = reports[0];
+
+  if (!clientReady || !clientFilter) {
+    return (
+      <div className="app-page">
+        <div className="mx-auto w-full max-w-[var(--ai-max-content)] p-6">
+          <p className="text-[var(--ai-muted)]">Loading client…</p>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -164,20 +164,9 @@ export default function NarrativeIntelligencePage() {
         </p>
 
         <div className="flex flex-wrap items-center gap-3 mb-6">
-          <label className="text-sm font-medium text-[var(--ai-text-secondary)]">
-            Client:
-          </label>
-          <select
-            value={clientFilter}
-            onChange={(e) => setClientFilter(e.target.value)}
-            className="rounded-lg border border-[var(--ai-border)] bg-[var(--ai-surface)] px-3 py-2 text-sm text-[var(--ai-text)]"
-          >
-            {clients.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
+          <p className="text-sm font-medium text-[var(--ai-text-secondary)]">
+            Client: <span className="text-[var(--ai-text)]">{clientFilter}</span>
+          </p>
           <button
             type="button"
             onClick={fetchReports}

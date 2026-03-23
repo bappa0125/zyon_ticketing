@@ -1,205 +1,216 @@
-# Narrative taxonomy — rule-based tags for mentions (forums, articles).
-# Objective: narrative source / amplifier / positioning: tag WHAT is being discussed,
-# then aggregate by forum_site, source_domain, entity.
-#
-# Forums in scope: TradingQnA, ValuePickr, Hacker News (via RSS feed_domain).
+99241"}
+# Narrative taxonomy — Political CXO Intelligence (Nrendra Modi)
 
-version: 1
+version: 2
 max_tags_per_mention: 2
 
-# For forum rows, role_in_frame explains how to read the row in CXO narrative work.
 forum_narrative_frame:
   surface: forum
   role_in_narrative: amplifier
   description: >
-    Community threads amplify, debate, and redistribute narratives that often
-    start in publications or creator channels. Use forum_site + narrative_tags
-    for “where discussion clusters” and gap vs rivals.
+    Forums amplify and stress-test narratives formed in media and leadership messaging.
+    Use forum_site + narrative_tags to identify narrative momentum and gaps vs competitors.
 
 tags:
-  - id: pricing_charges
-    label: Pricing & charges
-    description: Cost to trade, plans, free brokerage, AMC, hidden fees
-    keywords:
-      - brokerage
-      - brokerage charges
-      - charges
-      - amc
-      - account maintenance
-      - hidden charges
-      - zero brokerage
-      - ₹20
-      - rs 20
-      - pricing
-      - cheap broker
-      - discount broker
-      - lowest brokerage
 
-  - id: platform_ux_stability
-    label: Platform & app stability
-    description: App/website quality, bugs, speed, outages, login
-    keywords:
-      - kite
-      - app crash
-      - login failed
-      - server down
-      - outage
-      - not working
-      - slow chart
-      - platform down
-      - app issue
-      - bug
+  # ------------------------------------------------
+  # CORE LEADERSHIP & GOVERNANCE
+  # ------------------------------------------------
 
-  - id: options_fno
-    label: Options & F&O
-    description: Derivatives, strategies, margin, expiry
+  - id: governance_administration
+    label: Governance & execution
+    description: Effectiveness of governance, execution capability
     keywords:
-      - f&o
-      - fno
-      - options
-      - option selling
-      - straddle
-      - strangle
-      - expiry
-      - margin
-      - open interest
-      - oi
-      - mcx
-      - futures
+      - governance
+      - administration
+      - policy implementation
+      - execution
+      - governance model
+      - decision making
+      - government performance
 
-  - id: trust_safety
-    label: Trust & safety
-    description: Scam, fraud, safe, withdrawal, SEBI registration
+  - id: leadership_image
+    label: Leadership strength & image
+    description: Strong leader perception, decisiveness, authority
     keywords:
+      - strong leader
+      - decisive leader
+      - leadership style
+      - powerful leader
+      - global leader
+      - popularity
+      - leadership image
+
+  - id: policy_reforms
+    label: Policy & reforms
+    description: Structural reforms, laws, policy direction
+    keywords:
+      - reform
+      - new policy
+      - bill
+      - law
+      - regulation
+      - reform agenda
+      - policy change
+
+
+  # ------------------------------------------------
+  # MACRO ECONOMY (CRITICAL)
+  # ------------------------------------------------
+
+  - id: economy_macro
+    label: Economy & macro performance
+    description: GDP, inflation, jobs, economic strength
+    keywords:
+      - indian economy
+      - gdp growth
+      - inflation india
+      - unemployment
+      - jobs
+      - economic growth
+      - fiscal deficit
+      - economy outlook
+      - economic performance
+
+  - id: development_infra
+    label: Development & infrastructure
+    description: Infra projects, growth, public works
+    keywords:
+      - infrastructure
+      - development
+      - highways
+      - railways
+      - smart city
+      - urban development
+      - rural development
+
+  - id: welfare_schemes
+    label: Welfare & schemes
+    description: Public welfare programs, subsidies
+    keywords:
+      - scheme
+      - yojana
+      - subsidy
+      - welfare
+      - benefits
+      - government scheme
+
+
+  # ------------------------------------------------
+  # GEOPOLITICS & DEFENSE (HIGH IMPACT)
+  # ------------------------------------------------
+
+  - id: geopolitics
+    label: Geopolitics & global positioning
+    description: India's global role, diplomacy, alliances
+    keywords:
+      - geopolitics
+      - foreign policy
+      - india global position
+      - diplomacy
+      - international relations
+      - india us relations
+      - india china
+      - india russia
+      - global influence
+
+  - id: defense_security
+    label: Defense & national security
+    description: Military strength, security, borders
+    keywords:
+      - national security
+      - defense india
+      - indian army
+      - military strength
+      - border security
+      - defense policy
+      - armed forces
+
+
+  # ------------------------------------------------
+  # POLITICAL COMPETITION & POWER
+  # ------------------------------------------------
+
+  - id: election_politics
+    label: Elections & political strategy
+    description: Elections, campaigns, power dynamics
+    keywords:
+      - election
+      - campaign
+      - vote
+      - voting
+      - lok sabha
+      - assembly election
+      - manifesto
+      - political strategy
+
+  - id: opposition_positioning
+    label: Opposition & competition
+    description: Rival leaders, comparison narratives
+    keywords:
+      - opposition
+      - vs
+      - comparison
+      - better than
+      - vs kejriwal
+      - vs rahul gandhi
+      - vs mamta
+      - vs stalin
+
+  - id: corruption_transparency
+    label: Corruption & accountability
+    description: Corruption allegations, governance integrity
+    keywords:
+      - corruption
       - scam
+      - transparency
+      - accountability
       - fraud
-      - safe hai
-      - is it safe
-      - withdrawal
-      - sebi registered
-      - trustworthy
-      - money stuck
+      - allegation
 
-  - id: support_resolution
-    label: Support & resolution
-    description: Customer care, tickets, no response
-    keywords:
-      - customer care
-      - support ticket
-      - no response
-      - customer support
-      - helpline
 
-  - id: education_content
-    label: Education & content
-    description: Learn trading, courses, webinars, beginners
-    keywords:
-      - learn trading
-      - webinar
-      - course
-      - for beginners
-      - stock market basics
-      - strategy basics
+  # ------------------------------------------------
+  # MEDIA & NARRATIVE CONTROL
+  # ------------------------------------------------
 
-  - id: ipo_primary
-    label: IPO & primary market
-    description: IPO, allotment, mandate, RHP, listing
+  - id: media_narrative
+    label: Media narrative & bias
+    description: Media framing, bias, propaganda
     keywords:
-      - ipo
-      - allotment
-      - rhp
-      - red herring
-      - upi mandate
-      - primary market
-      - listing gain
-      - grey market
+      - media bias
+      - propaganda
+      - narrative
+      - news coverage
+      - biased media
+      - fake news
+      - media agenda
 
-  - id: value_investing_recommendations
-    label: Value investing & stock recommendations
-    description: Fundamental value, long-term picks, research calls, valuation
-    keywords:
-      - value investing
-      - intrinsic value
-      - fundamental analysis
-      - stock recommendation
-      - research report
-      - buy call
-      - sell call
-      - target price
-      - undervalued
-      - moat
-      - dcf
 
-  - id: ai_analytics
-    label: AI analytics & research tech
-    description: AI-driven research, ML signals, smart analytics (not generic "algorithm")
-    keywords:
-      - ai research
-      - ai recommendation
-      - machine learning
-      - ai analytics
-      - automated research
-      - generative ai
-      - llm
-      - ai powered
-      - robo research
+  # ------------------------------------------------
+  # SOCIETAL & IDENTITY POLITICS
+  # ------------------------------------------------
 
-  - id: ai_trigger_algo_strategy
-    label: AI triggers & algo strategy
-    description: Alerts, rule-based / systematic triggers, algo trading discussion
+  - id: religion_identity
+    label: Religion & identity politics
+    description: Religious, caste, identity narratives
     keywords:
-      - algo trading
-      - algorithmic trading
-      - trading algorithm
-      - alert trigger
-      - price alert
-      - automated strategy
-      - systematic trading
-      - bot trading
-      - strategy backtest
+      - religion
+      - caste
+      - identity politics
+      - hindu
+      - muslim
+      - minority
+      - majority
+      - communal
 
-  - id: mf_wealth
-    label: Mutual funds & wealth
-    description: SIP, mutual funds, direct plan, long-term wealth
+  - id: youth_jobs_education
+    label: Youth, jobs & education
+    description: Youth issues, employment, education
     keywords:
-      - sip
-      - mutual fund
-      - mutual funds
-      - direct plan
-      - index fund
-      - wealth management
-      - asset management company
-
-  - id: regulatory_compliance
-    label: Regulatory & compliance
-    description: SEBI, circulars, penalties, compliance
-    keywords:
-      - sebi
-      - circular
-      - penalty
-      - compliance
-      - regulatory
-      - order
-
-  - id: brand_influencer
-    label: Brand & influencer
-    description: Sponsored content, paid partnership, creator promo
-    keywords:
-      - sponsored
-      - paid partnership
-      - ad disclosure
-      - influencer
-      - promo code
-      - affiliate
-
-  - id: commodity_research
-    label: Commodity research & MCX
-    description: Commodity calls, MCX, gold, crude, agri futures
-    keywords:
-      - commodity
-      - mcx
-      - crude oil
-      - gold futures
-      - silver futures
-      - natural gas futures
-      - agri commodity
+      - jobs
+      - youth
+      - unemployment
+      - education
+      - students
+      - job creation
+      - skill development

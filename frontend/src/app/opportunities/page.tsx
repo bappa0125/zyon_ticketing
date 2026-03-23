@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { OpportunityTable, OpportunityRow } from "@/components/OpportunityTable";
 import Link from "next/link";
-import { getApiBase } from "@/lib/api";
+import { getApiBase, withClientQuery } from "@/lib/api";
+import { useActiveClient } from "@/context/ClientContext";
 
 type TabId = "topics" | "quote-alerts" | "outreach-drafts" | "competitor-responses";
 
@@ -32,6 +33,7 @@ interface CompetitorResponse {
 }
 
 export default function OpportunitiesPage() {
+  const { clientName: clientFilter, ready: clientReady } = useActiveClient();
   const [opportunities, setOpportunities] = useState<OpportunityRow[]>([]);
   const [quoteAlerts, setQuoteAlerts] = useState<QuoteAlert[]>([]);
   const [outreachDrafts, setOutreachDrafts] = useState<OutreachDraft[]>([]);
@@ -40,19 +42,19 @@ export default function OpportunitiesPage() {
   const [loadingPrIntel, setLoadingPrIntel] = useState(true);
   const [runningBatch, setRunningBatch] = useState(false);
   const [lastComputedAt, setLastComputedAt] = useState<string | null>(null);
-  const [clientFilter, setClientFilter] = useState<string>("Sahi");
-  const [clients, setClients] = useState<string[]>([]);
   const [tab, setTab] = useState<TabId>("topics");
 
   const fetchOpportunities = useCallback(async () => {
-    if (!clientFilter.trim()) {
+    if (!clientReady || !clientFilter?.trim()) {
       setOpportunities([]);
       setLoading(false);
       return;
     }
     setLoading(true);
     try {
-      const res = await fetch(`${getApiBase()}/opportunities?client=${encodeURIComponent(clientFilter)}`);
+      const res = await fetch(
+        withClientQuery(`${getApiBase()}/opportunities?client=${encodeURIComponent(clientFilter)}`, clientFilter)
+      );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setOpportunities(data.opportunities ?? []);
@@ -62,10 +64,10 @@ export default function OpportunitiesPage() {
     } finally {
       setLoading(false);
     }
-  }, [clientFilter]);
+  }, [clientFilter, clientReady]);
 
   const fetchPrIntel = useCallback(async () => {
-    if (!clientFilter.trim()) {
+    if (!clientReady || !clientFilter?.trim()) {
       setQuoteAlerts([]);
       setOutreachDrafts([]);
       setCompetitorResponses([]);
@@ -74,7 +76,12 @@ export default function OpportunitiesPage() {
     }
     setLoadingPrIntel(true);
     try {
-      const res = await fetch(`${getApiBase()}/opportunities/pr-intel?client=${encodeURIComponent(clientFilter)}&days=7`);
+      const res = await fetch(
+        withClientQuery(
+          `${getApiBase()}/opportunities/pr-intel?client=${encodeURIComponent(clientFilter)}&days=7`,
+          clientFilter
+        )
+      );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setQuoteAlerts(data.quote_alerts ?? []);
@@ -89,23 +96,7 @@ export default function OpportunitiesPage() {
     } finally {
       setLoadingPrIntel(false);
     }
-  }, [clientFilter]);
-
-  useEffect(() => {
-    async function loadClients() {
-      try {
-        const res = await fetch(`${getApiBase()}/clients`);
-        if (!res.ok) return;
-        const j = await res.json();
-        const list = j.clients?.map((c: { name?: string }) => c.name).filter(Boolean) ?? [];
-        setClients(list);
-        if (list.length > 0 && !clientFilter) setClientFilter(list[0]);
-      } catch {
-        setClients([]);
-      }
-    }
-    loadClients();
-  }, []);
+  }, [clientFilter, clientReady]);
 
   useEffect(() => {
     fetchOpportunities();
@@ -116,11 +107,14 @@ export default function OpportunitiesPage() {
   }, [fetchPrIntel]);
 
   const runBatch = useCallback(async () => {
-    if (!clientFilter.trim()) return;
+    if (!clientReady || !clientFilter?.trim()) return;
     setRunningBatch(true);
     try {
       const res = await fetch(
-        `${getApiBase()}/opportunities/run-batch?client=${encodeURIComponent(clientFilter)}`,
+        withClientQuery(
+          `${getApiBase()}/opportunities/run-batch?client=${encodeURIComponent(clientFilter)}`,
+          clientFilter
+        ),
         { method: "POST" }
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -130,7 +124,7 @@ export default function OpportunitiesPage() {
     } finally {
       setRunningBatch(false);
     }
-  }, [clientFilter, fetchPrIntel]);
+  }, [clientFilter, fetchPrIntel, clientReady]);
 
   const formatLastRun = (iso: string | null) => {
     if (!iso) return null;
@@ -141,6 +135,14 @@ export default function OpportunitiesPage() {
       return iso;
     }
   };
+
+  if (!clientReady || !clientFilter) {
+    return (
+      <div className="app-page p-6">
+        <p className="text-sm text-zinc-500">Loading client…</p>
+      </div>
+    );
+  }
 
   const tabs: { id: TabId; label: string }[] = [
     { id: "topics", label: "Topic gaps" },
@@ -168,23 +170,13 @@ export default function OpportunitiesPage() {
           Topic gaps (competitors have coverage, client doesn&apos;t), plus story comment alerts (no-comment wording in ingested news), outreach drafts, and competitor response angles — each tab explains what it is in plain language.
         </p>
         <div className="flex flex-wrap items-center gap-4 mb-6">
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-zinc-400">Client</label>
-            <select
-              value={clientFilter}
-              onChange={(e) => setClientFilter(e.target.value)}
-              className="px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-600 min-w-[160px]"
-            >
-              <option value="">Select client</option>
-              {clients.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
-          </div>
+          <p className="text-sm text-zinc-400">
+            Client: <strong className="text-zinc-200">{clientFilter}</strong>
+          </p>
           <button
             type="button"
             onClick={runBatch}
-            disabled={!clientFilter.trim() || runningBatch}
+            disabled={!clientFilter?.trim() || runningBatch}
             className="px-4 py-2 rounded-lg bg-amber-600 text-white font-medium text-sm hover:bg-amber-500 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {runningBatch ? "Generating…" : "Generate / Refresh"}
@@ -213,7 +205,7 @@ export default function OpportunitiesPage() {
           ))}
         </div>
 
-        {!clientFilter.trim() && (
+        {!clientFilter?.trim() && (
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/30 p-8 text-center text-zinc-500">
             Select a client to view PR opportunities.
           </div>

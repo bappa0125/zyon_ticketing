@@ -5,7 +5,8 @@ import { TopicTable, TopicRow } from "@/components/TopicTable";
 import { TopicsBriefingCards } from "@/components/TopicsBriefingCards";
 import Link from "next/link";
 
-import { getApiBase } from "@/lib/api";
+import { getApiBase, withClientQuery } from "@/lib/api";
+import { useActiveClient } from "@/context/ClientContext";
 
 const RANGE_OPTIONS = [
   { value: "24h", label: "24h" },
@@ -21,36 +22,25 @@ interface TopicsResponse {
 }
 
 export default function TopicsPage() {
+  const { clientName: clientFilter, ready: clientReady } = useActiveClient();
   const [topics, setTopics] = useState<TopicRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [clientFilter, setClientFilter] = useState<string>("");
   const [range, setRange] = useState<string>("7d");
-  const [clients, setClients] = useState<{ name: string }[]>([]);
   const [responseMeta, setResponseMeta] = useState<{ client: string | null; range: string }>({ client: null, range: "7d" });
 
   useEffect(() => {
-    async function fetchClients() {
-      try {
-        const res = await fetch(`${getApiBase()}/clients`);
-        if (!res.ok) return;
-        const json = await res.json();
-        const list = json.clients ?? [];
-        setClients(list);
-        if (list.length > 0 && !clientFilter) setClientFilter(list[0].name);
-      } catch {
-        setClients([]);
-      }
-    }
-    fetchClients();
-  }, []);
-
-  useEffect(() => {
     async function fetchTopics() {
+      if (!clientReady || !clientFilter?.trim()) {
+        setTopics([]);
+        setLoading(false);
+        return;
+      }
+      setLoading(true);
       try {
         const params = new URLSearchParams();
         params.set("range_param", range);
-        if (clientFilter.trim()) params.set("client", clientFilter.trim());
-        const url = `${getApiBase()}/topics?${params.toString()}`;
+        params.set("client", clientFilter.trim());
+        const url = withClientQuery(`${getApiBase()}/topics?${params.toString()}`, clientFilter);
         const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data: TopicsResponse = await res.json();
@@ -64,7 +54,7 @@ export default function TopicsPage() {
       }
     }
     fetchTopics();
-  }, [clientFilter, range]);
+  }, [clientFilter, range, clientReady]);
 
   function handleExportBrief() {
     const rows = [
@@ -90,7 +80,17 @@ export default function TopicsPage() {
     URL.revokeObjectURL(url);
   }
 
-  const displayClient = responseMeta.client ?? "All";
+  const displayClient = responseMeta.client ?? clientFilter ?? "—";
+
+  if (!clientReady || !clientFilter) {
+    return (
+      <div className="app-page">
+        <div className="max-w-6xl mx-auto p-6">
+          <p className="text-sm text-zinc-500">Loading client…</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="app-page">
@@ -107,24 +107,12 @@ export default function TopicsPage() {
           </Link>
         </div>
 
-        {/* Header: TOPICS & TRENDING – Sahi  [Client ▼] [7d ▼] */}
+        {/* Header: TOPICS & TRENDING – client from nav switcher [7d ▼] */}
         <header className="flex flex-wrap items-center justify-between gap-4 py-4 border-b border-zinc-800">
           <h1 className="text-xl font-semibold text-zinc-100">
             TOPICS & TRENDING – {displayClient}
           </h1>
           <div className="flex items-center gap-3">
-            <select
-              value={clientFilter}
-              onChange={(e) => setClientFilter(e.target.value)}
-              className="px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-200 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-600"
-            >
-              <option value="">All</option>
-              {clients.map((c) => (
-                <option key={c.name} value={c.name}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
             <select
               value={range}
               onChange={(e) => setRange(e.target.value)}

@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { getApiBase } from "@/lib/api";
+import { getApiBase, withClientQuery } from "@/lib/api";
+import { useActiveClient } from "@/context/ClientContext";
 
 interface EarliestRef {
   title: string;
@@ -62,7 +63,7 @@ const gapStyles: Record<string, string> = {
 };
 
 export default function NarrativeLandscapePage() {
-  const [client, setClient] = useState("Sahi");
+  const { clientName: client, ready: clientReady } = useActiveClient();
   const [rangeDays, setRangeDays] = useState(30);
   const [rows, setRows] = useState<LandscapeRow[]>([]);
   const [gaps, setGaps] = useState<ExecutiveGap[]>([]);
@@ -71,15 +72,24 @@ export default function NarrativeLandscapePage() {
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
+    if (!clientReady || !client?.trim()) {
+      setRows([]);
+      setGaps([]);
+      setFrame(null);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams({
-        client: client.trim() || "Sahi",
+        client: client.trim(),
         range_days: String(rangeDays),
         top_tags: "15",
       });
-      const res = await fetch(`${getApiBase()}/social/narrative-landscape?${params}`);
+      const res = await fetch(
+        withClientQuery(`${getApiBase()}/social/narrative-landscape?${params}`, client)
+      );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (data.error) setError(data.error);
@@ -93,11 +103,19 @@ export default function NarrativeLandscapePage() {
     } finally {
       setLoading(false);
     }
-  }, [client, rangeDays]);
+  }, [client, rangeDays, clientReady]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  if (!clientReady || !client) {
+    return (
+      <div className="app-page p-6">
+        <p className="text-sm text-[var(--ai-muted)]">Loading client…</p>
+      </div>
+    );
+  }
 
   return (
     <div className="app-page">
@@ -109,14 +127,9 @@ export default function NarrativeLandscapePage() {
         </p>
 
         <div className="flex flex-wrap items-end gap-4 mb-8">
-          <label className="flex flex-col gap-1 text-sm text-[var(--ai-text-secondary)]">
-            Client
-            <input
-              value={client}
-              onChange={(e) => setClient(e.target.value)}
-              className="rounded-lg border border-[var(--ai-border)] bg-[var(--ai-bg)] px-3 py-2 text-[var(--ai-text)] w-40"
-            />
-          </label>
+          <p className="text-sm text-[var(--ai-text-secondary)] pb-2">
+            Client: <strong className="text-[var(--ai-text)]">{client}</strong>
+          </p>
           <label className="flex flex-col gap-1 text-sm text-[var(--ai-text-secondary)]">
             Window (days)
             <select

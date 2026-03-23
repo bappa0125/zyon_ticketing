@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { getApiBase } from "@/lib/api";
+import { getApiBase, withClientQuery } from "@/lib/api";
+import { useActiveClient } from "@/context/ClientContext";
 import { TopicArticlesSection } from "@/components/PRIntelligence/TopicArticlesSection";
 import { FirstMentionsSection } from "@/components/PRIntelligence/FirstMentionsSection";
 import { AmplifiersSection } from "@/components/PRIntelligence/AmplifiersSection";
@@ -16,8 +17,7 @@ const RANGE_OPTIONS = [
 ] as const;
 
 export default function PRIntelligencePage() {
-  const [clients, setClients] = useState<{ name: string }[]>([]);
-  const [client, setClient] = useState("");
+  const { clientName: client, ready: clientReady } = useActiveClient();
   const [range, setRange] = useState("7d");
   const [tab, setTab] = useState<TabId>("topics");
   const [topicFilter, setTopicFilter] = useState("");
@@ -33,29 +33,15 @@ export default function PRIntelligencePage() {
   const [loadingAmp, setLoadingAmp] = useState(false);
   const [loadingJournalists, setLoadingJournalists] = useState(false);
 
-  useEffect(() => {
-    async function fetchClients() {
-      try {
-        const res = await fetch(`${getApiBase()}/clients`);
-        if (!res.ok) return;
-        const json = await res.json();
-        const list = json.clients ?? [];
-        setClients(list);
-        if (list.length > 0 && !client) setClient(list[0].name);
-      } catch {
-        setClients([]);
-      }
-    }
-    fetchClients();
-  }, []);
-
   const fetchTopicArticles = useCallback(async () => {
-    if (!client.trim()) return;
+    if (!clientReady || !client?.trim()) return;
     setLoadingTopics(true);
     try {
       const params = new URLSearchParams({ client, range });
       if (topicFilter.trim()) params.set("topic", topicFilter.trim());
-      const res = await fetch(`${getApiBase()}/pr-intelligence/topic-articles?${params}`);
+      const res = await fetch(
+        withClientQuery(`${getApiBase()}/pr-intelligence/topic-articles?${params}`, client)
+      );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setTopicArticles(data);
@@ -65,15 +51,17 @@ export default function PRIntelligencePage() {
     } finally {
       setLoadingTopics(false);
     }
-  }, [client, range, topicFilter]);
+  }, [client, range, topicFilter, clientReady]);
 
   const fetchFirstMentions = useCallback(async () => {
-    if (!client.trim()) return;
+    if (!clientReady || !client?.trim()) return;
     setLoadingFirst(true);
     try {
       const params = new URLSearchParams({ client, range });
       if (topicFilter.trim()) params.set("topic", topicFilter.trim());
-      const res = await fetch(`${getApiBase()}/pr-intelligence/first-mentions?${params}`);
+      const res = await fetch(
+        withClientQuery(`${getApiBase()}/pr-intelligence/first-mentions?${params}`, client)
+      );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setFirstMentions(data);
@@ -83,17 +71,19 @@ export default function PRIntelligencePage() {
     } finally {
       setLoadingFirst(false);
     }
-  }, [client, range, topicFilter]);
+  }, [client, range, topicFilter, clientReady]);
 
   const fetchAmplifiers = useCallback(async () => {
-    if (!client.trim() || !amplifierTopic.trim()) {
+    if (!clientReady || !client?.trim() || !amplifierTopic.trim()) {
       setAmplifiers(null);
       return;
     }
     setLoadingAmp(true);
     try {
       const params = new URLSearchParams({ client, topic: amplifierTopic, range });
-      const res = await fetch(`${getApiBase()}/pr-intelligence/amplifiers?${params}`);
+      const res = await fetch(
+        withClientQuery(`${getApiBase()}/pr-intelligence/amplifiers?${params}`, client)
+      );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setAmplifiers(data);
@@ -103,14 +93,16 @@ export default function PRIntelligencePage() {
     } finally {
       setLoadingAmp(false);
     }
-  }, [client, range, amplifierTopic]);
+  }, [client, range, amplifierTopic, clientReady]);
 
   const fetchJournalists = useCallback(async () => {
-    if (!client.trim()) return;
+    if (!clientReady || !client?.trim()) return;
     setLoadingJournalists(true);
     try {
       const params = new URLSearchParams({ client, range });
-      const res = await fetch(`${getApiBase()}/pr-intelligence/journalist-outlets?${params}`);
+      const res = await fetch(
+        withClientQuery(`${getApiBase()}/pr-intelligence/journalist-outlets?${params}`, client)
+      );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setJournalists(data);
@@ -120,7 +112,7 @@ export default function PRIntelligencePage() {
     } finally {
       setLoadingJournalists(false);
     }
-  }, [client, range]);
+  }, [client, range, clientReady]);
 
   useEffect(() => {
     if (tab === "topics") fetchTopicArticles();
@@ -148,6 +140,14 @@ export default function PRIntelligencePage() {
 
   const topicsList = (topicArticles as { topics?: { topic: string }[] })?.topics ?? [];
 
+  if (!clientReady || !client) {
+    return (
+      <div className="app-page p-6">
+        <p className="text-sm text-[var(--ai-muted)]">Loading client…</p>
+      </div>
+    );
+  }
+
   return (
     <div className="app-page">
       <div className="max-w-6xl mx-auto p-6">
@@ -159,20 +159,9 @@ export default function PRIntelligencePage() {
         </header>
 
         <section className="flex flex-wrap items-center gap-4 mb-6 p-4 rounded-xl border border-[var(--ai-border)] bg-[var(--ai-surface)]">
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-[var(--ai-muted)]">Client</label>
-            <select
-              value={client}
-              onChange={(e) => setClient(e.target.value)}
-              className="px-3 py-2 rounded-lg bg-[var(--ai-bg-elevated)] border border-[var(--ai-border)] text-[var(--ai-text)] focus:outline-none focus:ring-2 focus:ring-[var(--ai-accent)] min-w-[160px]"
-            >
-              <option value="">Select client</option>
-              {clients.map((c) => (
-                <option key={c.name} value={c.name}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+          <div className="flex items-center gap-2 text-sm text-[var(--ai-muted)]">
+            <span>Client</span>
+            <span className="font-semibold text-[var(--ai-text)]">{client}</span>
           </div>
           <div className="flex items-center gap-2">
             <label className="text-sm text-[var(--ai-muted)]">Period</label>
@@ -248,7 +237,7 @@ export default function PRIntelligencePage() {
           ))}
         </div>
 
-        {!client.trim() && (
+        {!client?.trim() && (
           <div className="rounded-xl border border-[var(--ai-border)] bg-[var(--ai-surface)] p-8 text-center text-[var(--ai-muted)]">
             Select a client to view PR intelligence.
           </div>

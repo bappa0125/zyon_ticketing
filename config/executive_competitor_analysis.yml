@@ -1,7 +1,7 @@
 # Executive Competitor Analysis — client set for CXO report
 # Used when executive_competitor_analysis.use_this_file is true (see dev.yaml).
-# All client/alias/ignore_patterns taken from clients.yaml for: Zerodha, Dhan, Groww, Kotak Securities, Sahi.
-# Each client lists the other four as competitors so pipelines run per brand.
+# Trading set: Zerodha, Dhan, Groww, Kotak Securities, Sahi (competitors cross-linked).
+# Political portfolio: Narendra Modi (same block as config/clients.yaml) so /clients UI can switch verticals.
 
 clients:
   - name: Sahi
@@ -125,3 +125,24 @@ clients:
       - name: Zerodha
       - name: Dhan
       - name: Groww
+
+  - name: Narendra Modi
+    domain: narendramodi.in
+    report_timezone: Asia/Kolkata
+    vertical: political
+    features:
+      forums: false
+      youtube: true
+      reddit: true
+      twitter: true
+      twitter_schema: political
+    aliases:
+      - narendra modi
+      - pm modi
+      - prime minister modi
+      - modi government
+      - bjp modi
+    ignore_patterns:
+      - narendra modi stadium
+      - modi script
+    competitors: []

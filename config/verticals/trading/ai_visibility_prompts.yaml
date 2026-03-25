@@ -1,0 +1,58 @@
+# AI Search Visibility — prompt groups (Phase 1: curated only)
+# Each group represents a discovery pathway for brokerage platforms.
+# Execution is capped by ai_search_visibility.max_prompts_per_run and max_per_group_per_run in dev.yaml.
+
+prompt_groups:
+  - id: broker_discovery
+    name: "Broker discovery queries"
+    prompts:
+      - "Best stock trading app India 2024"
+      - "Top discount brokers India"
+      - "Best demat account India"
+      - "Best online brokerage India"
+      - "Top trading platforms for beginners India"
+      - "Best investment app India 2024"
+      - "Lowest brokerage trading platform India"
+      - "Best stock broker for retail investors India"
+
+  - id: zerodha_alternative
+    name: "Zerodha alternative queries"
+    prompts:
+      - "Zerodha alternatives India"
+      - "Best apps like Zerodha"
+      - "Trading platforms better than Zerodha"
+      - "Zerodha vs other brokers"
+      - "Cheaper than Zerodha India"
+      - "Best Zerodha alternative for options"
+      - "Similar to Zerodha with lower charges"
+
+  - id: feature_driven
+    name: "Feature-driven queries"
+    prompts:
+      - "Best platform for options trading India"
+      - "Fastest trading platform India"
+      - "Best broker for derivatives India"
+      - "Trading app with best charting India"
+      - "Zero brokerage trading app India"
+      - "Best algo trading platform India"
+      - "Trading platform with API India"
+
+  - id: problem_driven
+    name: "Problem-driven trader queries"
+    prompts:
+      - "Best broker for day trading India"
+      - "Trading platform with low latency India"
+      - "Best for futures and options India"
+      - "Reliable broker for scalping India"
+      - "Best customer support trading broker India"
+      - "Trading app with good margin rates India"
+
+  - id: product_comparison
+    name: "Product comparison queries"
+    prompts:
+      - "Upstox vs Zerodha vs Groww"
+      - "Best discount broker comparison India"
+      - "Zerodha vs Upstox which is better"
+      - "Groww vs Zerodha for trading"
+      - "Best trading app comparison India 2024"
+      - "Angel One vs Zerodha vs Upstox"

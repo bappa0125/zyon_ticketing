@@ -46,6 +46,7 @@ services:
       - .env
     environment:
       - APP_ENV=dev
+      - CONFIG_BUNDLE=trading
       - MONGODB_URL=mongodb://mongodb:27017
       - REDIS_URL=redis://redis:6379/0
       - QDRANT_URL=http://qdrant:6333
@@ -71,6 +72,7 @@ services:
       dockerfile: backend/Dockerfile.worker
     environment:
       - APP_ENV=dev
+      - CONFIG_BUNDLE=trading
       - MONGODB_URL=mongodb://mongodb:27017
       - REDIS_URL=redis://redis:6379/0
       - QDRANT_URL=http://qdrant:6333

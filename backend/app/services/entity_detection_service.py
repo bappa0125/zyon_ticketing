@@ -42,6 +42,7 @@ _entity_map: dict[str, list[str]] | None = None
 _ignore_patterns: list[str] = []
 # Precompiled alias lookup: list of (alias_lower, entity) sorted by alias length desc for longest match
 _alias_lookup: list[tuple[str, str]] = []
+_entity_map_bundle_tag: str | None = None
 _entity_regex: Optional[re.Pattern[str]] = None
 _entity_to_canonical: dict[str, str] = {}  # normalized name/alias -> canonical entity
 _nlp = None  # spaCy model, lazy-loaded
@@ -114,10 +115,21 @@ def _build_entity_map() -> tuple[dict[str, list[str]], list[str], list[tuple[str
     return entity_map, ignore, alias_pairs
 
 
+def _invalidate_entity_regex() -> None:
+    global _entity_regex, _entity_to_canonical
+    _entity_regex = None
+    _entity_to_canonical = {}
+
+
 def _get_entity_map() -> tuple[dict[str, list[str]], list[str]]:
-    global _entity_map, _ignore_patterns, _alias_lookup
-    if _entity_map is None:
+    global _entity_map, _ignore_patterns, _alias_lookup, _entity_map_bundle_tag
+    from app.core.vertical_config_bundle import get_effective_config_bundle
+
+    tag = get_effective_config_bundle() or "default"
+    if _entity_map is None or _entity_map_bundle_tag != tag:
         _entity_map, _ignore_patterns, _alias_lookup = _build_entity_map()
+        _entity_map_bundle_tag = tag
+        _invalidate_entity_regex()
     return _entity_map, _ignore_patterns
 
 

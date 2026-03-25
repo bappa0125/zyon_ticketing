@@ -65,6 +65,9 @@ async def run_youtube_monitor() -> dict[str, int]:
             doc = {
                 "platform": "youtube",
                 "entity": entity,
+                "video_title": (post.get("video_title") or "")[:300],
+                "video_description": (post.get("video_description") or "")[:1200],
+                "channel": (post.get("channel") or "")[:120],
                 "text": (text or "")[:500],
                 "url": (post.get("url") or "")[:500],
                 "content_hash": content_hash,

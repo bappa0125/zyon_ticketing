@@ -12,8 +12,10 @@ Collect social media mentions of monitored entities using Apify actors. Supports
 
 | Platform | Config Key | Default Actor |
 |----------|------------|---------------|
-| Twitter | twitter_actor | apify/twitter-search-scraper |
-| YouTube | youtube_actor | apify/youtube-comment-scraper |
+| Twitter | twitter_actor | `apidojo/tweet-scraper` (Tweet Scraper V2) |
+| Twitter | twitter_input_style | `tweet_scraper_v2` (or `scraper_engine` for `scraper-engine/twitter-x-scraper`) |
+| Twitter | twitter_sort | `Latest` (V2 only; actor also supports `Top`, etc.) |
+| YouTube | youtube_actor | `streamers/youtube-scraper` (see `social_monitor_service`) |
 
 **Config:** `config/monitoring.yaml`
 
@@ -23,10 +25,14 @@ monitoring:
     twitter: true
     youtube: true
   apify:
-    twitter_actor: apify/twitter-search-scraper
-    youtube_actor: apify/youtube-comment-scraper
+    twitter_actor: apidojo/tweet-scraper
+    twitter_input_style: tweet_scraper_v2
+    twitter_sort: Latest
+    youtube_actor: streamers/youtube-scraper
     max_items_per_run: 20
 ```
+
+Actor input/output fields are defined by each Apify actor; confirm the latest **Input** tab in the Apify Console. Tweet Scraper V2 documents `searchTerms`, `maxItems`, and `sort` on [apify.com/apidojo/tweet-scraper](https://apify.com/apidojo/tweet-scraper).
 
 ## Combined Search Query Strategy
 

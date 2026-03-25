@@ -54,6 +54,7 @@ def fetch_youtube_mentions() -> list[dict[str, Any]]:
             title = item.get("video_title") or item.get("title") or item.get("name") or ""
             desc = item.get("video_description") or item.get("description") or ""
             url = item.get("url") or item.get("videoUrl") or item.get("link") or ""
+            channel = item.get("channelName") or item.get("channel") or item.get("author") or ""
             views = item.get("views") or item.get("viewCount") or 0
             likes = item.get("likes") or item.get("likeCount") or 0
             comments_raw = item.get("comments")
@@ -103,6 +104,10 @@ def fetch_youtube_mentions() -> list[dict[str, Any]]:
                 results.append({
                     "platform": "youtube",
                     "entity": entity,
+                    # Keep video fields so UI can show video link + description.
+                    "video_title": (title or "")[:300],
+                    "video_description": (desc or "")[:1200],
+                    "channel": (channel or "")[:120],
                     "text": text,
                     "url": (url or "")[:500],
                     "engagement": {"likes": int(likes), "retweets": 0, "comments": int(comment_count)},

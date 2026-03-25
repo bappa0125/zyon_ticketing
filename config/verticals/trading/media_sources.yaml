@@ -1,0 +1,520 @@
+# Media sources for article indexing
+# Existing fields preserved for backward compatibility:
+# domain, rss_feed, crawl_frequency
+
+sources:
+
+  # ------------------------------------------------
+  # FINANCIAL NEWS (HIGH PRIORITY)
+  # ------------------------------------------------
+
+  # Moneycontrol: multiple official RSS endpoints (same domain → one Coverage row; dedupe by article URL).
+  # Verified 200 + application/xml (avoid indian_markets.xml / markets.xml — often 503).
+  - domain: moneycontrol.com
+    name: Moneycontrol — Business
+    category: financial_news
+    region: india
+    crawl_method: rss
+    rss_feed: https://www.moneycontrol.com/rss/business.xml
+    crawl_frequency: 120
+    priority: 1
+    weight: 10
+
+  - domain: moneycontrol.com
+    name: Moneycontrol — Market reports
+    category: financial_news
+    region: india
+    crawl_method: rss
+    rss_feed: https://www.moneycontrol.com/rss/marketreports.xml
+    crawl_frequency: 120
+    priority: 1
+    weight: 10
+
+  - domain: moneycontrol.com
+    name: Moneycontrol — Latest news
+    category: financial_news
+    region: india
+    crawl_method: rss
+    rss_feed: https://www.moneycontrol.com/rss/latestnews.xml
+    crawl_frequency: 120
+    priority: 1
+    weight: 9
+
+  - domain: moneycontrol.com
+    name: Moneycontrol — Most popular
+    category: financial_news
+    region: india
+    crawl_method: rss
+    rss_feed: https://www.moneycontrol.com/rss/mostpopular.xml
+    crawl_frequency: 180
+    priority: 2
+    weight: 7
+
+  - domain: economictimes.indiatimes.com
+    name: Economic Times Markets
+    category: financial_news
+    region: india
+    crawl_method: rss
+    rss_feed: https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms
+    crawl_frequency: 120
+    priority: 1
+    weight: 10
+
+  - domain: livemint.com
+    name: Mint Markets
+    category: financial_news
+    region: india
+    crawl_method: rss
+    rss_feed: https://www.livemint.com/rss/markets
+    crawl_frequency: 120
+    priority: 1
+    weight: 9
+
+  - domain: business-standard.com
+    name: Business Standard
+    category: financial_news
+    region: india
+    crawl_method: rss
+    rss_feed: https://www.business-standard.com/rss/home_page_top_stories.rss
+    crawl_frequency: 120
+    priority: 1
+    weight: 9
+
+  - domain: financialexpress.com
+    name: Financial Express
+    category: financial_news
+    region: india
+    crawl_method: html
+    entry_url: https://www.financialexpress.com/market/
+    rss_feed: null
+    crawl_frequency: 120
+    priority: 1
+    weight: 8
+
+  - domain: cnbctv18.com
+    name: CNBC TV18
+    category: financial_news
+    region: india
+    crawl_method: rss
+    rss_feed: https://www.cnbctv18.com/rss/
+    crawl_frequency: 120
+    priority: 1
+    weight: 8
+
+  - domain: ndtvprofit.com
+    name: NDTV Profit
+    category: financial_news
+    region: india
+    crawl_method: rss
+    rss_feed: https://www.ndtvprofit.com/rss
+    crawl_frequency: 120
+    priority: 1
+    weight: 7
+
+
+  # ------------------------------------------------
+  # STARTUP / FINTECH MEDIA
+  # ------------------------------------------------
+
+  - domain: inc42.com
+    name: Inc42
+    category: startup_media
+    region: india
+    crawl_method: rss
+    rss_feed: https://inc42.com/feed/
+    crawl_frequency: 120
+    priority: 2
+    weight: 7
+
+  - domain: yourstory.com
+    name: YourStory
+    category: startup_media
+    region: india
+    crawl_method: rss
+    rss_feed: https://yourstory.com/feed
+    crawl_frequency: 120
+    priority: 2
+    weight: 7
+
+  - domain: entrackr.com
+    name: Entrackr
+    category: startup_media
+    region: india
+    crawl_method: html
+    entry_url: https://entrackr.com/all-article
+    rss_feed: null
+    crawl_frequency: 120
+    priority: 2
+    weight: 7
+
+  - domain: medianama.com
+    name: MediaNama
+    category: fintech_media
+    region: india
+    crawl_method: rss
+    rss_feed: https://www.medianama.com/feed/
+    crawl_frequency: 120
+    priority: 2
+    weight: 7
+
+  - domain: techcrunch.com
+    name: TechCrunch
+    category: startup_media
+    region: global
+    crawl_method: rss
+    rss_feed: https://techcrunch.com/feed/
+    crawl_frequency: 120
+    priority: 2
+    weight: 6
+
+  - domain: techinasia.com
+    name: Tech In Asia
+    category: startup_media
+    region: asia
+    crawl_method: rss
+    rss_feed: https://www.techinasia.com/feed
+    crawl_frequency: 120
+    priority: 2
+    weight: 6
+
+
+  # ------------------------------------------------
+  # BROKER / FINTECH BLOGS
+  # ------------------------------------------------
+
+  - domain: zerodha.com
+    name: Zerodha Z-Connect
+    category: broker_blog
+    region: india
+    crawl_method: rss
+    rss_feed: https://zerodha.com/z-connect/feed
+    crawl_frequency: 180
+    priority: 2
+    weight: 9
+
+  - domain: upstox.com
+    name: Upstox Blog
+    category: broker_blog
+    region: india
+    crawl_method: html
+    entry_url: https://upstox.com/market-talk/
+    rss_feed: null
+    crawl_frequency: 180
+    priority: 2
+    weight: 7
+
+  - domain: groww.in
+    name: Groww Blog
+    category: broker_blog
+    region: india
+    crawl_method: html
+    entry_url: https://groww.in/blog/
+    rss_feed: null
+    crawl_frequency: 180
+    priority: 2
+    weight: 7
+
+  - domain: angelone.in
+    name: Angel One Blog
+    category: broker_blog
+    region: india
+    crawl_method: html
+    entry_url: https://www.angelone.in/blog
+    rss_feed: null
+    crawl_frequency: 180
+    priority: 2
+    weight: 7
+
+  - domain: dhan.co
+    name: Dhan Blog
+    category: broker_blog
+    region: india
+    crawl_method: rss
+    rss_feed: https://dhan.co/blog/feed/
+    crawl_frequency: 180
+    priority: 2
+    weight: 7
+
+
+  # ------------------------------------------------
+  # TRADER COMMUNITIES
+  # ------------------------------------------------
+
+  # Forum RSS: one doc per thread (RSS item = thread URL → article_fetcher fetches full thread)
+  - domain: tradingqna.com
+    name: TradingQnA
+    category: forum
+    region: india
+    crawl_method: rss
+    rss_feed: https://tradingqna.com/latest.rss
+    crawl_frequency: 180
+    priority: 2
+    weight: 8
+
+  - domain: traderji.com
+    name: Traderji Forum
+    category: forum
+    region: india
+    crawl_method: html
+    entry_url: https://www.traderji.com/forums/
+    rss_feed: null
+    crawl_frequency: 180
+    priority: 2
+    weight: 7
+
+  - domain: valuepickr.com
+    name: ValuePickr
+    category: forum
+    region: india
+    crawl_method: rss
+    rss_feed: https://forum.valuepickr.com/latest.rss
+    crawl_frequency: 180
+    priority: 2
+    weight: 7
+
+  # Hacker News front page — links are often external; feed_domain preserved on article_documents
+  # for forum-style narrative tagging (entity_mentions type=forum when feed_domain matches).
+  - domain: news.ycombinator.com
+    name: Hacker News
+    category: forum
+    region: global
+    crawl_method: rss
+    rss_feed: https://news.ycombinator.com/rss
+    crawl_frequency: 120
+    priority: 2
+    weight: 6
+
+
+  # ------------------------------------------------
+  # MARKET ANALYSIS BLOGS
+  # ------------------------------------------------
+
+  - domain: capitalmind.in
+    name: Capitalmind
+    category: analysis_blog
+    region: india
+    crawl_method: rss
+    rss_feed: https://www.capitalmind.in/feed/
+    crawl_frequency: 180
+    priority: 3
+    weight: 6
+
+  - domain: finshots.in
+    name: Finshots
+    category: analysis_blog
+    region: india
+    crawl_method: rss
+    rss_feed: https://finshots.in/archive/feed/
+    crawl_frequency: 180
+    priority: 3
+    weight: 6
+
+  - domain: freefincal.com
+    name: Freefincal
+    category: analysis_blog
+    region: india
+    crawl_method: rss
+    rss_feed: https://freefincal.com/feed/
+    crawl_frequency: 180
+    priority: 3
+    weight: 6
+
+  - domain: subramoney.com
+    name: Subramoney
+    category: analysis_blog
+    region: india
+    crawl_method: html
+    entry_url: https://www.subramoney.com/
+    rss_feed: null
+    crawl_frequency: 180
+    priority: 3
+    weight: 6
+      # ------------------------------------------------
+  # ADDITIONAL FINANCIAL NEWS (HIGH SIGNAL)
+  # ------------------------------------------------
+
+  - domain: thehindubusinessline.com
+    name: Hindu BusinessLine
+    category: financial_news
+    region: india
+    crawl_method: rss
+    rss_feed: https://www.thehindubusinessline.com/feeder/default.rss
+    crawl_frequency: 120
+    priority: 1
+    weight: 9
+
+  - domain: businesstoday.in
+    name: Business Today Markets
+    category: financial_news
+    region: india
+    crawl_method: html
+    entry_url: https://www.businesstoday.in/markets
+    rss_feed: null
+    crawl_frequency: 120
+    priority: 1
+    weight: 8
+
+  - domain: outlookbusiness.com
+    name: Outlook Business
+    category: financial_news
+    region: india
+    crawl_method: html
+    entry_url: https://www.outlookbusiness.com/
+    rss_feed: null
+    crawl_frequency: 120
+    priority: 2
+    weight: 7
+
+  - domain: fortuneindia.com
+    name: Fortune India
+    category: financial_news
+    region: india
+    crawl_method: rss
+    rss_feed: https://www.fortuneindia.com/feed
+    crawl_frequency: 120
+    priority: 2
+    weight: 7
+
+
+  # ------------------------------------------------
+  # GLOBAL FINANCE MEDIA (IMPORTANT SIGNAL)
+  # ------------------------------------------------
+
+  - domain: reuters.com
+    name: Reuters Business
+    category: global_finance
+    region: global
+    crawl_method: html
+    entry_url: https://www.reuters.com/business/
+    rss_feed: null
+    crawl_frequency: 120
+    priority: 2
+    weight: 8
+
+  - domain: bloomberg.com
+    name: Bloomberg Markets
+    category: global_finance
+    region: global
+    crawl_method: rss
+    rss_feed: https://www.bloomberg.com/markets/rss
+    crawl_frequency: 120
+    priority: 2
+    weight: 8
+
+  - domain: marketwatch.com
+    name: MarketWatch
+    category: global_finance
+    region: global
+    crawl_method: rss
+    rss_feed: https://feeds.marketwatch.com/marketwatch/topstories/
+    crawl_frequency: 120
+    priority: 2
+    weight: 7
+
+
+  # ------------------------------------------------
+  # FINTECH / PAYMENTS MEDIA
+  # ------------------------------------------------
+
+  - domain: fintechfutures.com
+    name: Fintech Futures
+    category: fintech_media
+    region: global
+    crawl_method: html
+    entry_url: https://www.fintechfutures.com/
+    rss_feed: null
+    crawl_frequency: 120
+    priority: 2
+    weight: 6
+
+  - domain: thepaypers.com
+    name: The Paypers
+    category: fintech_media
+    region: global
+    crawl_method: html
+    entry_url: https://thepaypers.com/
+    rss_feed: null
+    crawl_frequency: 120
+    priority: 2
+    weight: 6
+
+  - domain: pymnts.com
+    name: PYMNTS
+    category: fintech_media
+    region: global
+    crawl_method: rss
+    rss_feed: https://www.pymnts.com/feed/
+    crawl_frequency: 120
+    priority: 2
+    weight: 6
+
+
+  # ------------------------------------------------
+  # ADDITIONAL TRADING / INVESTOR COMMUNITIES
+  # ------------------------------------------------
+
+  - domain: elitewealth.in
+    name: Elite Wealth Forum
+    category: forum
+    region: india
+    crawl_method: html
+    entry_url: https://elitewealth.in/community/
+    rss_feed: null
+    crawl_frequency: 180
+    priority: 2
+    weight: 6
+
+  - domain: tradersexclusive.com
+    name: Traders Exclusive
+    category: forum
+    region: india
+    crawl_method: html
+    entry_url: https://tradersexclusive.com/forum/
+    rss_feed: null
+    crawl_frequency: 180
+    priority: 2
+    weight: 6
+
+
+  # ------------------------------------------------
+  # INVESTMENT ANALYSIS BLOGS
+  # ------------------------------------------------
+
+  - domain: safalniveshak.com
+    name: Safal Niveshak
+    category: analysis_blog
+    region: india
+    crawl_method: rss
+    rss_feed: https://www.safalniveshak.com/feed/
+    crawl_frequency: 180
+    priority: 3
+    weight: 6
+
+  - domain: stableinvestor.com
+    name: Stable Investor
+    category: analysis_blog
+    region: india
+    crawl_method: rss
+    rss_feed: https://stableinvestor.com/feed
+    crawl_frequency: 180
+    priority: 3
+    weight: 6
+
+  - domain: getmoneyrich.com
+    name: GetMoneyRich
+    category: analysis_blog
+    region: india
+    crawl_method: rss
+    rss_feed: https://www.getmoneyrich.com/feed/
+    crawl_frequency: 180
+    priority: 3
+    weight: 5
+  - domain: reddit.com
+    name: Reddit Indian Street Bets
+    category: forum
+    region: india
+    crawl_method: rss
+    rss_feed: https://www.reddit.com/r/IndianStreetBets/.rss
+    crawl_frequency: 180
+    priority: 2
+    weight: 6

@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 
 from app.api import chat, history, crawler, system_metrics, url_search, media_search, coverage, clients_api, media_api, sentiment_api, topics_api, coverage_api, opportunity_api, social_api, media_intelligence_api, reports_api, pr_intelligence_api, pr_reports_api
 from app.core.logging import setup_logging, get_logger
+from app.core.vertical_config_bundle import normalize_bundle_name, request_config_bundle
 from app.core.health import router as health_router
 from app.core.metrics import router as metrics_router
 
@@ -66,6 +67,18 @@ async def add_request_id(request, call_next):
     response = await call_next(request)
     response.headers["X-Request-ID"] = request_id
     return response
+
+
+@app.middleware("http")
+async def config_bundle_from_query(request, call_next):
+    """Select config/verticals/{political|trading}/ when ?vertical= matches (frontend sends from active client)."""
+    qv = normalize_bundle_name(request.query_params.get("vertical"))
+    token = request_config_bundle.set(qv) if qv else None
+    try:
+        return await call_next(request)
+    finally:
+        if token is not None:
+            request_config_bundle.reset(token)
 
 
 # Stream test must be registered first to avoid conflicts

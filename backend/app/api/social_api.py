@@ -28,11 +28,15 @@ async def get_social_latest(entity: Optional[str] = None, limit: int = DEFAULT_L
     if entity:
         query["entity"] = entity
 
-    cursor = coll.find(query).sort("timestamp", -1).limit(min(limit, 100))
+    cursor = (
+        coll.find(query)
+        .sort([("published_at", -1), ("timestamp", -1)])
+        .limit(min(limit, 100))
+    )
 
     posts = []
     async for doc in cursor:
-        ts = doc.get("timestamp")
+        ts = doc.get("published_at") or doc.get("timestamp")
         if isinstance(ts, datetime):
             ts = ts.isoformat()
         engagement = doc.get("engagement") or {}

@@ -6,11 +6,13 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
+  type MutableRefObject,
   type ReactNode,
 } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { getApiBase, ZYON_CLIENT_STORAGE_KEY } from "@/lib/api";
+import { activeClientVerticalBundleRef, getApiBase, ZYON_CLIENT_STORAGE_KEY } from "@/lib/api";
 import { firstClientForVertical, verticalFromClient } from "@/lib/clientVerticals";
 
 export type ClientFeatures = {
@@ -30,12 +32,16 @@ export type ClientRow = {
   report_timezone?: string;
 };
 
+/** While searchParams lag behind router.replace, avoid reverting context to the old ?client= value. */
+export type PendingClientUrl = { target: string; fromUrl: string };
+
 export type ActiveClientContextValue = {
   clients: ClientRow[];
   clientName: string | null;
   setClientName: (name: string) => void;
   activeClient: ClientRow | null;
   ready: boolean;
+  pendingClientUrlRef: MutableRefObject<PendingClientUrl | null>;
 };
 
 const ClientContext = createContext<ActiveClientContextValue | null>(null);
@@ -63,6 +69,7 @@ function normalizeClient(raw: Record<string, unknown>): ClientRow | null {
 export function ClientProvider({ children }: { children: ReactNode }) {
   const [clients, setClients] = useState<ClientRow[]>([]);
   const [clientName, setClientNameState] = useState<string | null>(null);
+  const pendingClientUrlRef = useRef<PendingClientUrl | null>(null);
   const router = useRouter();
   const pathname = usePathname() || "/";
 
@@ -124,6 +131,13 @@ export function ClientProvider({ children }: { children: ReactNode }) {
       const trimmed = name.trim();
       const row = clients.find((c) => c.name === trimmed);
       if (!trimmed || !row) return;
+      if (typeof window !== "undefined") {
+        const fromUrl =
+          new URLSearchParams(window.location.search).get("client")?.trim() ?? "";
+        pendingClientUrlRef.current = { target: trimmed, fromUrl };
+      } else {
+        pendingClientUrlRef.current = { target: trimmed, fromUrl: "" };
+      }
       setClientNameState(trimmed);
       if (typeof window !== "undefined") {
         localStorage.setItem(ZYON_CLIENT_STORAGE_KEY, trimmed);
@@ -142,6 +156,10 @@ export function ClientProvider({ children }: { children: ReactNode }) {
     [clients, clientName]
   );
 
+  if (typeof window !== "undefined") {
+    activeClientVerticalBundleRef.current = activeClient ? verticalFromClient(activeClient) : null;
+  }
+
   const ready = clients.length > 0 && clientName !== null;
 
   const value = useMemo<ActiveClientContextValue>(
@@ -151,6 +169,7 @@ export function ClientProvider({ children }: { children: ReactNode }) {
       setClientName,
       activeClient,
       ready,
+      pendingClientUrlRef,
     }),
     [clients, clientName, setClientName, activeClient, ready]
   );

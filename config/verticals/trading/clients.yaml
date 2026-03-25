@@ -1,0 +1,217 @@
+clients:
+  - name: Sahi
+    domain: sahi.com
+    # Calendar-day buckets for narrative mention trends (IST). API ?timezone= overrides.
+    report_timezone: Asia/Kolkata
+
+    aliases:
+      - sahi
+      - sahi trading
+      - sahi trading app
+      - sahi brokerage
+      - sahi derivatives
+      - sahi investment app
+      - sahi trading platform
+      - sahi options trading
+      - sahi app
+      - sahi fintech
+      - sahi stock trading
+      - sahi broker
+      - sahi investing platform
+      - sahi discount broker
+      - sahi capital markets
+      - sahi retail trading app
+      - sahi derivatives trading
+      - sahi markets platform
+
+    context_keywords:
+      - trading
+      - broker
+      - brokerage
+      - demat
+      - stock
+      - derivatives
+      - investment
+      - fintech
+
+    ignore_patterns:
+      - sahi hai
+      - bilkul sahi
+      - sahi baat
+      - bilkul sahi hai
+      - sahi kaha
+      - theek sahi
+      - sahi ai app
+      - sahi bola
+
+    competitors:
+
+      - name: Zerodha
+        domain: zerodha.com
+        aliases:
+          - zerodha
+          - zerodha kite
+          - kite
+          - kite trading
+          - kite trading app
+          - zerodha brokerage
+          - zerodha trading platform
+          - zerodha demat
+        ignore_patterns:
+          - kite festival
+          - flying kite
+          - kite flying
+          - kite festival india
+
+      - name: Upstox
+        domain: upstox.com
+        aliases:
+          - upstox
+          - upstox trading
+          - upstox app
+          - upstox brokerage
+          - upstox pro
+          - upstox demat
+        ignore_patterns:
+          - up stocks
+          - stocks going up
+          - up stock market
+          - up stock rally
+
+      - name: Groww
+        domain: groww.in
+        aliases:
+          - groww
+          - groww app
+          - groww investment app
+          - groww trading
+          - groww brokerage
+          - groww demat
+        ignore_patterns:
+          - grow
+          - growing
+          - grow business
+          - grow revenue
+          - grow your wealth
+          - grow your business
+          - grow economy
+
+      - name: Angel One
+        domain: angelone.in
+        aliases:
+          - angel one
+          - angelone
+          - angel one trading
+          - angel one brokerage
+          - angelone app
+        ignore_patterns:
+          - angel investor
+          - angel investors
+          - angel investing
+          - angel funding
+          - angel investment
+          - angel network
+          - angel list
+          - startup angel
+
+      - name: Dhan
+        domain: dhan.co
+        aliases:
+          - dhan
+          - dhan trading
+          - dhan brokerage
+          - dhan app
+          - dhan trading platform
+        ignore_patterns:
+          - dhanteras
+          - dhan yog
+          - dhan astrology
+          - dhan mantra
+          - dhan festival
+          - dhanush
+
+      - name: Fyers
+        domain: fyers.in
+        aliases:
+          - fyers
+          - fyers trading
+          - fyers brokerage
+          - fyers app
+          - fyers demat
+        ignore_patterns:
+          - fyers meaning
+          - fyers pronunciation
+
+      - name: Alice Blue
+        domain: aliceblueonline.com
+        aliases:
+          - alice blue
+          - aliceblue
+          - alice blue securities
+          - aliceblue brokerage
+          - aliceblue trading
+        ignore_patterns:
+          - alice in wonderland
+          - alice movie
+          - alice novel
+          - alice book
+          - alice character
+
+      - name: 5paisa
+        domain: 5paisa.com
+        aliases:
+          - 5paisa
+          - 5paisa.com
+          - 5paisa trading
+          - 5paisa brokerage
+          - 5paisa demat
+        ignore_patterns:
+          - paisa vasool
+          - paisa movie
+          - paisa song
+          - paisa meaning
+
+      - name: Kotak Securities
+        domain: kotaksecurities.com
+        aliases:
+          - kotak securities
+          - kotak trading
+          - kotak brokerage
+          - kotak stock trading
+          - kotak securities ltd
+        ignore_patterns:
+          - kotak mahindra bank
+          - kotak bank
+          - kotak insurance
+          - kotak mutual fund
+          - kotak credit card
+
+      - name: ICICI Direct
+        domain: icicidirect.com
+        aliases:
+          - icici direct
+          - icici securities
+          - icici direct trading
+          - icici direct brokerage
+          - icici trading platform
+        ignore_patterns:
+          - icici bank
+          - icici lombard
+          - icici prudential
+          - icici insurance
+          - icici credit card
+
+      - name: HDFC Securities
+        domain: hdfcsec.com
+        aliases:
+          - hdfc securities
+          - hdfc securities ltd
+          - hdfc trading
+          - hdfc brokerage
+          - hdfc securities trading
+        ignore_patterns:
+          - hdfc bank
+          - hdfc life
+          - hdfc housing
+          - hdfc insurance
+          - hdfc home loan

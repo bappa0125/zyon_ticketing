@@ -17,6 +17,7 @@ import yaml
 
 from app.config import get_config
 from app.core.client_config_loader import get_entity_names, load_clients
+from app.core.vertical_config_bundle import resolve_bundled_config_file
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -36,9 +37,8 @@ def _cfg() -> dict[str, Any]:
 def _load_prompt_groups() -> list[dict[str, Any]]:
     """Load prompt groups from config/ai_visibility_prompts.yaml (or path in ai_search_visibility)."""
     cfg = _cfg()
-    config_dir = _get_config_dir()
     filename = (cfg.get("prompt_groups_file") or "ai_visibility_prompts.yaml").strip()
-    path = config_dir / filename
+    path = resolve_bundled_config_file(filename)
     if not path.exists():
         logger.warning("ai_search_visibility_prompts_file_not_found", path=str(path))
         return []

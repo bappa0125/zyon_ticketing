@@ -15,16 +15,34 @@ export function getApiBase(): string {
 export const ZYON_CLIENT_STORAGE_KEY = "zyon_active_client";
 
 /**
+ * API ?vertical= bundle — updated during ClientProvider render (before children) so useEffect
+ * fetches see the right config. Browser-only; SSR leaves null (legacy bundle on API).
+ */
+export const activeClientVerticalBundleRef: {
+  current: "political" | "trading" | null;
+} = { current: null };
+
+function getActiveClientVerticalBundle(): "political" | "trading" | null {
+  return activeClientVerticalBundleRef.current;
+}
+
+/**
  * Set or replace `client` on a path that may already have a query string.
  * Use for GETs so the active UI client is always sent to the API.
  */
 export function withClientQuery(pathWithOptionalQuery: string, client: string | null | undefined): string {
   const trimmed = (client ?? "").trim();
-  if (!trimmed) return pathWithOptionalQuery;
   const qIdx = pathWithOptionalQuery.indexOf("?");
   const path = qIdx === -1 ? pathWithOptionalQuery : pathWithOptionalQuery.slice(0, qIdx);
   const raw = qIdx === -1 ? "" : pathWithOptionalQuery.slice(qIdx + 1);
   const params = new URLSearchParams(raw);
-  params.set("client", trimmed);
-  return `${path}?${params.toString()}`;
+  if (trimmed) {
+    params.set("client", trimmed);
+  }
+  const vb = getActiveClientVerticalBundle();
+  if (vb === "political" || vb === "trading") {
+    params.set("vertical", vb);
+  }
+  const qs = params.toString();
+  return qs ? `${path}?${qs}` : path;
 }

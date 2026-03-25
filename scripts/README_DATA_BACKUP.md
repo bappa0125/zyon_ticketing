@@ -46,6 +46,22 @@ Runs a backup every 3600 seconds. Override with `BACKUP_INTERVAL_SECONDS=1800` i
 
 ## Restore (reference)
 
-- **MongoDB:** `docker compose exec -T mongodb mongorestore --archive < data_backup/<ts>/mongodb/chat.archive`
-- **Redis:** stop Redis, replace `/data/dump.rdb` in the volume with `data_backup/<ts>/redis/dump.rdb`, start Redis
+## Restore (script)
+
+From the project root:
+
+```bash
+./scripts/restore_data_backup.sh data_backup/<timestamp>
+```
+
+This restores:
+
+- **MongoDB**: `chat` database (uses `--drop`)
+- **Redis**: replaces `/data/dump.rdb` and restarts the `redis` container
+- **Qdrant**: best-effort (snapshot restore is version/collection dependent; may require manual restore)
+
+## Restore (manual reference)
+
+- **MongoDB:** `docker compose exec -T mongodb mongorestore --drop --db=chat --archive < data_backup/<ts>/mongodb/chat.archive`
+- **Redis:** copy `data_backup/<ts>/redis/dump.rdb` to `redis:/data/dump.rdb` then `docker compose restart redis`
 - **Qdrant:** use Qdrant’s snapshot restore (see [Qdrant docs](https://qdrant.tech/documentation/tutorials-operations/create-snapshot/))

@@ -23,8 +23,10 @@ echo "[backup] Started at $(date -Iseconds) → ${BACKUP_DIR}"
 
 # --- MongoDB (database: chat) ---
 echo "[backup] MongoDB (chat)..."
-if $COMPOSE_CMD exec -T mongodb mongodump --db=chat --archive &>"${BACKUP_DIR}/mongodb/chat.archive"; then
-  echo "[backup] MongoDB OK → mongodb/chat.archive"
+# IMPORTANT: mongodump writes archive bytes to stdout and logs to stderr.
+# Redirecting both to the same file corrupts the archive.
+if $COMPOSE_CMD exec -T mongodb mongodump --db=chat --archive >"${BACKUP_DIR}/mongodb/chat.archive" 2>"${BACKUP_DIR}/mongodb/mongodump.log"; then
+  echo "[backup] MongoDB OK → mongodb/chat.archive (logs → mongodb/mongodump.log)"
 else
   echo "[backup] MongoDB failed (container may be down)" >&2
   rm -f "${BACKUP_DIR}/mongodb/chat.archive"

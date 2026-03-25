@@ -5,6 +5,7 @@ from typing import Any
 from app.core.client_config_loader import get_entity_names, load_clients
 from app.core.logging import get_logger
 from app.services.apify_service import run_actor
+from app.services.apify_twitter_actor import build_twitter_actor_input, normalize_tweet_for_social_posts
 
 logger = get_logger(__name__)
 
@@ -18,35 +19,6 @@ def _detect_entity(text: str, entities: list[str]) -> str | None:
         if e and e.lower() in text_lower:
             return e
     return None
-
-
-def _normalize_twitter(item: dict[str, Any], entities: list[str]) -> dict[str, Any] | None:
-    """Normalize Twitter/X scraper output to social_posts schema."""
-    text = item.get("full_text") or item.get("text") or item.get("content") or ""
-    entity = _detect_entity(text, entities)
-    if not entity:
-        return None
-    favorites = item.get("favorite_count") or item.get("favorites") or item.get("likes") or 0
-    retweets = item.get("retweet_count") or item.get("retweets") or 0
-    url = item.get("url") or item.get("tweet_url") or item.get("id", "")
-    if url and not url.startswith("http"):
-        url = f"https://twitter.com/i/status/{url}" if url.isdigit() else ""
-    created = item.get("created_at") or item.get("createdAt")
-    if isinstance(created, str):
-        try:
-            ts = datetime.fromisoformat(created.replace("Z", "+00:00"))
-        except (ValueError, TypeError):
-            ts = datetime.utcnow()
-    else:
-        ts = datetime.utcnow()
-    return {
-        "platform": "twitter",
-        "entity": entity,
-        "text": (text or "")[:500],
-        "url": (url or "")[:500],
-        "engagement": {"likes": int(favorites), "retweets": int(retweets), "comments": 0},
-        "timestamp": ts,
-    }
 
 
 def _normalize_youtube(item: dict[str, Any], entities: list[str]) -> dict[str, Any] | None:
@@ -101,15 +73,26 @@ async def fetch_social_mentions() -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
 
     if sources.get("twitter"):
-        actor_id = apify_cfg.get("twitter_actor", "scraper-engine/twitter-x-scraper")
-        # scraper-engine/twitter-x-scraper uses startUrls (URLs, usernames, or search keywords) and maxTweets
-        input_data = {
-            "startUrls": [query],
-            "maxTweets": min(max_items, 100),
-        }
+        actor_id = apify_cfg.get("twitter_actor", "apidojo/tweet-scraper")
+        input_style = apify_cfg.get("twitter_input_style", "tweet_scraper_v2")
+        try:
+            input_data = build_twitter_actor_input(
+                style=input_style,
+                combined_query=query,
+                max_items=max_items,
+                apify_cfg=apify_cfg,
+            )
+        except ValueError as e:
+            logger.warning("twitter_apify_input_style_invalid", error=str(e))
+            input_data = build_twitter_actor_input(
+                style="tweet_scraper_v2",
+                combined_query=query,
+                max_items=max_items,
+                apify_cfg=apify_cfg,
+            )
         items = run_actor(actor_id, input_data)
         for item in items:
-            norm = _normalize_twitter(item, entities)
+            norm = normalize_tweet_for_social_posts(item, entities)
             if norm:
                 results.append(norm)
         results = results[:max_items]

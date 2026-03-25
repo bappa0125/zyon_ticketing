@@ -4,13 +4,12 @@ Supports forum + article mentions; used for narrative source/amplifier/positioni
 """
 from __future__ import annotations
 
-from functools import lru_cache
-from pathlib import Path
-from typing import Any
+from typing import Any, Optional, Tuple
 
 import yaml
 
 from app.core.logging import get_logger
+from app.core.vertical_config_bundle import resolve_bundled_config_file
 
 logger = get_logger(__name__)
 
@@ -26,26 +25,37 @@ _FORUM_FEED_DOMAINS = frozenset({
 })
 
 
-def _config_dir() -> Path:
-    project_root = Path(__file__).resolve().parent.parent.parent
-    d = project_root / "config"
-    if d.exists():
-        return d
-    return Path("/app/config")
+_TAXONOMY_CACHE: Tuple[Optional[str], float, dict[str, Any]] | None = None
 
 
-@lru_cache(maxsize=1)
 def _load_taxonomy_raw() -> dict[str, Any]:
-    path = _config_dir() / "narrative_taxonomy.yaml"
+    global _TAXONOMY_CACHE
+    path = resolve_bundled_config_file("narrative_taxonomy.yaml")
+    path_key = str(path.resolve())
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        mtime = -1.0
+    if _TAXONOMY_CACHE and _TAXONOMY_CACHE[0] == path_key and _TAXONOMY_CACHE[1] == mtime:
+        return _TAXONOMY_CACHE[2]
     if not path.exists():
         logger.warning("narrative_taxonomy_missing", path=str(path))
-        return {}
-    with open(path) as f:
-        return yaml.safe_load(f) or {}
+        out: dict[str, Any] = {}
+        _TAXONOMY_CACHE = (path_key, mtime, out)
+        return out
+    try:
+        with open(path) as f:
+            out = yaml.safe_load(f) or {}
+    except Exception as e:
+        logger.warning("narrative_taxonomy_parse_failed", path=str(path), error=str(e))
+        out = {}
+    _TAXONOMY_CACHE = (path_key, mtime, out)
+    return out
 
 
 def clear_narrative_taxonomy_cache() -> None:
-    _load_taxonomy_raw.cache_clear()
+    global _TAXONOMY_CACHE
+    _TAXONOMY_CACHE = None
 
 
 def get_forum_narrative_frame() -> dict[str, Any]:

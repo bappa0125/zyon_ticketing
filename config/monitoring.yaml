@@ -25,19 +25,27 @@ monitoring:
     enabled: true
     actor: "streamers/youtube-scraper"
     max_items_per_run: 10
-  # Apify social (Twitter/YouTube) disabled — not configured for now
   social_sources:
-    twitter: false
+    twitter: true
     youtube: false
   apify:
-    max_items_per_run: 20
+    max_items_per_run: 50
+    twitter_actor: "61RPP7dywgiy0JPD0"
+    twitter_input_style: apify_official
+    twitter_sort: Latest
+    twitter_tweet_language: en
+    twitter_search_terms:
+      - "Narendra Modi"
+      - "PM Modi"
+    twitter_handles:
+      - narendramodi
   social_data:
     retention_days: 30
     max_posts_per_entity_per_day: 100
     engagement_thresholds:
-      likes: 2
-      retweets: 1
-      comments: 1
+      likes: 0
+      retweets: 0
+      comments: 0
     deduplication:
       enabled: true
       hash_algorithm: md5

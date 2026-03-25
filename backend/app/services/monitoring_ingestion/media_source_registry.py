@@ -5,6 +5,7 @@ from typing import Any, Optional, Tuple
 import yaml
 
 from app.core.client_config_loader import _get_config_dir
+from app.core.vertical_config_bundle import resolve_bundled_config_file
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -74,7 +75,7 @@ def load_media_sources() -> list[dict[str, Any]]:
     are preserved as-is. Reloads when media_sources.yaml mtime changes.
     """
     global _SOURCES_CACHE
-    path = _get_config_dir() / "media_sources.yaml"
+    path = resolve_bundled_config_file("media_sources.yaml")
     path_key = str(path.resolve())
     try:
         mtime = path.stat().st_mtime

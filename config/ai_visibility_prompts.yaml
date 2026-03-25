@@ -1,58 +1,60 @@
-# AI Search Visibility — prompt groups (Phase 1: curated only)
-# Each group represents a discovery pathway for brokerage platforms.
-# Execution is capped by ai_search_visibility.max_prompts_per_run and max_per_group_per_run in dev.yaml.
+# AI Search Visibility — prompt groups (Political)
+# Adapted for Nrendra Modi vs competitors narrative tracking
 
 prompt_groups:
-  - id: broker_discovery
-    name: "Broker discovery queries"
-    prompts:
-      - "Best stock trading app India 2024"
-      - "Top discount brokers India"
-      - "Best demat account India"
-      - "Best online brokerage India"
-      - "Top trading platforms for beginners India"
-      - "Best investment app India 2024"
-      - "Lowest brokerage trading platform India"
-      - "Best stock broker for retail investors India"
 
-  - id: zerodha_alternative
-    name: "Zerodha alternative queries"
+  - id: leader_discovery
+    name: "Political leader discovery queries"
     prompts:
-      - "Zerodha alternatives India"
-      - "Best apps like Zerodha"
-      - "Trading platforms better than Zerodha"
-      - "Zerodha vs other brokers"
-      - "Cheaper than Zerodha India"
-      - "Best Zerodha alternative for options"
-      - "Similar to Zerodha with lower charges"
+      - "Best political leader in India"
+      - "Top political leaders in India 2026"
+      - "Most popular leader in India"
+      - "Who is leading India politically"
+      - "Top politicians in India today"
+      - "Most influential Indian political leaders"
+      - "Who is the strongest leader in India"
+      - "Best prime minister India history"
+
+  - id: modi_alternatives
+    name: "Modi alternative queries"
+    prompts:
+      - "Alternatives to Narendra Modi"
+      - "Leaders better than Modi India"
+      - "Who can replace Modi as PM"
+      - "Opposition leaders vs Modi"
+      - "Best alternative to BJP leadership"
+      - "Who is better than Modi in India"
+      - "Next PM candidates India"
 
   - id: feature_driven
-    name: "Feature-driven queries"
+    name: "Leadership attribute queries"
     prompts:
-      - "Best platform for options trading India"
-      - "Fastest trading platform India"
-      - "Best broker for derivatives India"
-      - "Trading app with best charting India"
-      - "Zero brokerage trading app India"
-      - "Best algo trading platform India"
-      - "Trading platform with API India"
+      - "Best leader for economic growth India"
+      - "Strongest leader for governance India"
+      - "Leader with best development record India"
+      - "Most decisive political leader India"
+      - "Leader with best policies India"
+      - "Who is best for India’s future leadership"
+      - "Best leader for reforms in India"
 
   - id: problem_driven
-    name: "Problem-driven trader queries"
+    name: "Problem-driven political queries"
     prompts:
-      - "Best broker for day trading India"
-      - "Trading platform with low latency India"
-      - "Best for futures and options India"
-      - "Reliable broker for scalping India"
-      - "Best customer support trading broker India"
-      - "Trading app with good margin rates India"
+      - "Who can fix unemployment in India"
+      - "Best leader to improve Indian economy"
+      - "Who can control inflation India"
+      - "Leader best for job creation India"
+      - "Who handles corruption best in India"
+      - "Best leader for middle class India"
+      - "Who can improve governance in India"
 
-  - id: product_comparison
-    name: "Product comparison queries"
+  - id: leader_comparison
+    name: "Political comparison queries"
     prompts:
-      - "Upstox vs Zerodha vs Groww"
-      - "Best discount broker comparison India"
-      - "Zerodha vs Upstox which is better"
-      - "Groww vs Zerodha for trading"
-      - "Best trading app comparison India 2024"
-      - "Angel One vs Zerodha vs Upstox"
+      - "Modi vs Kejriwal who is better"
+      - "Modi vs Rahul Gandhi comparison"
+      - "Mamta Banerjee vs Modi leadership"
+      - "Stalin vs Modi governance"
+      - "Top Indian leaders comparison"
+      - "Best CM vs PM comparison India"
+      - "Who is better Modi or opposition leaders"

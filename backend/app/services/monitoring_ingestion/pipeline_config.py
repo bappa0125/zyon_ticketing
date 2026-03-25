@@ -31,7 +31,9 @@ def _load_clients_for_pipeline() -> list[dict[str, Any]]:
 
 def _load_media_sources_for_pipeline() -> list[dict[str, Any]]:
     """Load media sources from config/media_sources.yaml."""
-    path = _get_config_dir() / "media_sources.yaml"
+    from app.core.vertical_config_bundle import resolve_bundled_config_file
+
+    path = resolve_bundled_config_file("media_sources.yaml")
     if not path.exists():
         return []
     with open(path) as f:

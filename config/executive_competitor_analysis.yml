@@ -1,7 +1,7 @@
 # Executive Competitor Analysis — client set for CXO report
 # Used when executive_competitor_analysis.use_this_file is true (see dev.yaml).
 # Trading set: Zerodha, Dhan, Groww, Kotak Securities, Sahi (competitors cross-linked).
-# Political portfolio: Narendra Modi (same block as config/clients.yaml) so /clients UI can switch verticals.
+# Political portfolio: Narendra Modi + political competitors (align with clients.yaml for PR Pulse share of voice).
 
 clients:
   - name: Sahi
@@ -145,4 +145,81 @@ clients:
     ignore_patterns:
       - narendra modi stadium
       - modi script
-    competitors: []
+    # Same competitors as config/clients.yaml — required for Executive PR Pulse share of voice (get_entity_names).
+    competitors:
+      - name: Mamta Banerjee
+        domain: wb.gov.in
+        aliases:
+          - mamta banerjee
+          - mamata banerjee
+          - mamta
+          - didi
+          - mamta didi
+          - cm mamta banerjee
+          - west bengal cm mamta
+          - tmc mamta
+          - trinamool mamta
+          - mamta government
+          - mamta govt
+          - mamta speech
+        ignore_patterns:
+          - mamata meaning
+          - mamata song
+          - mamata film
+          - mamata serial
+          - mamata name meaning
+      - name: M. K. Stalin
+        domain: tn.gov.in
+        aliases:
+          - mk stalin
+          - m k stalin
+          - stalin
+          - cm stalin
+          - tamil nadu cm stalin
+          - dmk stalin
+          - stalin government
+          - stalin speech
+          - stalin tamil nadu
+        ignore_patterns:
+          - joseph stalin
+          - stalin soviet
+          - stalin history
+          - soviet union stalin
+          - stalin ww2
+          - stalin biography
+          - russian stalin
+      - name: Arvind Kejriwal
+        domain: delhi.gov.in
+        aliases:
+          - arvind kejriwal
+          - kejriwal
+          - cm kejriwal
+          - kejriwal delhi
+          - aap kejriwal
+          - kejriwal government
+          - kejriwal speech
+          - kejriwal policy
+          - kejriwal delhi govt
+        ignore_patterns:
+          - kejriwal meme
+          - kejriwal jokes
+          - kejriwal parody
+          - kejriwal funny
+          - kejriwal cartoon
+      - name: Rahul Gandhi
+        domain: inc.in
+        aliases:
+          - rahul gandhi
+          - rahul
+          - congress rahul gandhi
+          - rahul gandhi speech
+          - rahul gandhi congress
+          - rahul gandhi india
+          - rahul gandhi interview
+          - rahul gandhi rally
+        ignore_patterns:
+          - rahul dravid
+          - kl rahul
+          - rahul name meaning
+          - rahul song
+          - rahul movie

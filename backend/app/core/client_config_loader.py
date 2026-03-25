@@ -9,10 +9,10 @@ import yaml
 
 from app.config import get_config
 from app.core.logging import get_logger
+from app.core.vertical_config_bundle import clients_redis_cache_key, resolve_bundled_config_file
 
 logger = get_logger(__name__)
 
-CLIENTS_CONFIG_KEY = "clients_config"
 CACHE_TTL = 300
 
 # UI + ingestion routing: defaults keep legacy behaviour when YAML omits profile fields.
@@ -100,13 +100,12 @@ def _get_config_dir() -> Path:
 
 def _resolve_clients_config_path() -> Path:
     """Path to active clients file: executive_competitor_analysis*.yml when enabled, else clients.yaml."""
-    config_dir = _get_config_dir()
     cfg = get_config()
     exec_cfg = cfg.get("executive_competitor_analysis") or {}
     if isinstance(exec_cfg, dict) and exec_cfg.get("use_this_file"):
         filename = (exec_cfg.get("clients_file") or "executive_competitor_analysis.yml").strip()
-        return config_dir / filename
-    return config_dir / "clients.yaml"
+        return resolve_bundled_config_file(filename)
+    return resolve_bundled_config_file("clients.yaml")
 
 
 def _load_clients_from_file() -> list[dict[str, Any]]:
@@ -158,14 +157,15 @@ def clear_clients_sync_cache() -> None:
 
 async def load_clients() -> list[dict[str, Any]]:
     """
-    Load monitored clients. Cache in Redis (key: clients_config, TTL: 300s).
+    Load monitored clients. Cache in Redis (per config bundle, TTL: 300s).
     Load file only on cache miss.
     """
+    cache_key = clients_redis_cache_key()
     try:
         from app.services.redis_client import get_redis
 
         r = await get_redis()
-        cached = await r.get(CLIENTS_CONFIG_KEY)
+        cached = await r.get(cache_key)
         if cached:
             return json.loads(cached)
     except Exception as e:
@@ -176,7 +176,7 @@ async def load_clients() -> list[dict[str, Any]]:
         from app.services.redis_client import get_redis
 
         r = await get_redis()
-        await r.setex(CLIENTS_CONFIG_KEY, CACHE_TTL, json.dumps(clients))
+        await r.setex(cache_key, CACHE_TTL, json.dumps(clients))
     except Exception as e:
         logger.warning("clients_config_redis_set_failed", error=str(e))
 

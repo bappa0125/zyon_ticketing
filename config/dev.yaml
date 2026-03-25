@@ -37,6 +37,8 @@ app:
   name: zyon-chatbot
   env: dev
   debug: true
+  # Optional: force YAML bundle (political|trading). Empty = legacy root config only unless ?vertical= or CONFIG_BUNDLE env.
+  # config_bundle: ""
 
 server:
   host: 0.0.0.0

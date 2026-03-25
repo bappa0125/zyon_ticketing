@@ -8,6 +8,7 @@ import Link from "next/link";
 
 import { getApiBase, withClientQuery } from "@/lib/api";
 import { useActiveClient } from "@/context/ClientContext";
+import { getEntityHex } from "@/lib/entityColors";
 
 const RANGE_OPTIONS = [
   { value: "24h", label: "24h" },
@@ -22,16 +23,68 @@ const SENTIMENT_FILTERS = [
   { value: "negative", label: "Negative" },
 ] as const;
 
+const SOURCE_OPTIONS = [
+  { value: "all", label: "All" },
+  { value: "news", label: "News" },
+  { value: "forums", label: "Forums" },
+  { value: "reddit", label: "Reddit" },
+  { value: "youtube", label: "YouTube" },
+] as const;
+
+type NarrativeMeta = Record<string, { label?: string; description?: string }>;
+
+type TwitterNarrativeChartRow = {
+  narrative: string;
+  entity: string;
+  positive: number;
+  neutral: number;
+  negative: number;
+  total: number;
+};
+
+type TwitterNarrativePost = {
+  entity: string;
+  url: string;
+  text: string;
+  timestamp: string | null;
+  engagement: { likes?: number; retweets?: number; comments?: number };
+  narrative_primary: string | null;
+  narrative_tags: string[];
+  sentiment: string;
+  sentiment_compound?: number | null;
+};
+
+type NarrativeSentimentRow = {
+  narrative: string;
+  entity: string;
+  positive: number;
+  neutral: number;
+  negative: number;
+  total: number;
+};
+
 export default function SentimentPage() {
   const { clientName: client, activeClient, ready: clientReady } = useActiveClient();
   const [competitor, setCompetitor] = useState<string>("");
   const [competitorFilter, setCompetitorFilter] = useState<string>("");
   const [range, setRange] = useState<string>("7d");
   const [sentimentFilter, setSentimentFilter] = useState<string>("");
+  const [surface, setSurface] = useState<string>("all");
   const [summaries, setSummaries] = useState<SentimentSummary[]>([]);
   const [mentions, setMentions] = useState<MediaMentionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMentions, setLoadingMentions] = useState(true);
+
+  const [twLoading, setTwLoading] = useState(true);
+  const [twRefreshing, setTwRefreshing] = useState(false);
+  const [twRefreshInfo, setTwRefreshInfo] = useState<string>("");
+  const [twChartRows, setTwChartRows] = useState<TwitterNarrativeChartRow[]>([]);
+  const [twPosts, setTwPosts] = useState<TwitterNarrativePost[]>([]);
+  const [twMeta, setTwMeta] = useState<NarrativeMeta>({});
+
+  const [nsLoading, setNsLoading] = useState(true);
+  const [nsRows, setNsRows] = useState<NarrativeSentimentRow[]>([]);
+  const [nsMeta, setNsMeta] = useState<NarrativeMeta>({});
 
   const entities = useMemo(() => {
     if (!activeClient) return [];
@@ -48,12 +101,15 @@ export default function SentimentPage() {
     setLoading(true);
     const params = new URLSearchParams({ client });
     if (effectiveEntity) params.set("entity", effectiveEntity);
+    params.set("range", range);
+    if (surface && surface !== "all") params.set("surface", surface);
+    if (sentimentFilter) params.set("sentiment", sentimentFilter);
     fetch(withClientQuery(`${getApiBase()}/sentiment/summary?${params.toString()}`, client))
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
       .then((data) => setSummaries(data.summaries ?? []))
       .catch(() => setSummaries([]))
       .finally(() => setLoading(false));
-  }, [client, effectiveEntity, clientReady]);
+  }, [client, effectiveEntity, clientReady, surface, sentimentFilter, range]);
 
   useEffect(() => {
     if (!clientReady || !client?.trim()) {
@@ -65,12 +121,13 @@ export default function SentimentPage() {
     const params = new URLSearchParams({ client, range });
     if (sentimentFilter) params.set("sentiment", sentimentFilter);
     if (effectiveEntity) params.set("entity", effectiveEntity);
+    if (surface && surface !== "all") params.set("surface", surface);
     fetch(withClientQuery(`${getApiBase()}/sentiment/mentions?${params.toString()}`, client))
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
       .then((data) => setMentions(data.mentions ?? []))
       .catch(() => setMentions([]))
       .finally(() => setLoadingMentions(false));
-  }, [client, range, sentimentFilter, effectiveEntity, clientReady]);
+  }, [client, range, sentimentFilter, effectiveEntity, clientReady, surface]);
 
   useEffect(() => {
     if (client && competitor && !entities.includes(competitor)) setCompetitor("");
@@ -79,6 +136,98 @@ export default function SentimentPage() {
   const totalPositive = summaries.reduce((s, x) => s + x.positive, 0);
   const totalNeutral = summaries.reduce((s, x) => s + x.neutral, 0);
   const totalNegative = summaries.reduce((s, x) => s + x.negative, 0);
+
+  useEffect(() => {
+    if (!clientReady || !client?.trim()) {
+      setNsRows([]);
+      setNsMeta({});
+      setNsLoading(false);
+      return;
+    }
+    setNsLoading(true);
+    const params = new URLSearchParams({ client, range });
+    if (surface && surface !== "all") params.set("surface", surface);
+    if (effectiveEntity) params.set("entity", effectiveEntity);
+    if (sentimentFilter) params.set("sentiment", sentimentFilter);
+    fetch(withClientQuery(`${getApiBase()}/sentiment/narrative-sentiment?${params.toString()}`, client))
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
+      .then((data) => {
+        setNsRows((data?.chart_rows ?? []) as NarrativeSentimentRow[]);
+        setNsMeta((data?.narrative_meta ?? {}) as NarrativeMeta);
+      })
+      .catch(() => {
+        setNsRows([]);
+        setNsMeta({});
+      })
+      .finally(() => setNsLoading(false));
+  }, [client, range, clientReady, surface, effectiveEntity, sentimentFilter]);
+
+  const loadTwitterNarratives = async (opts?: { refreshFirst?: boolean }) => {
+    if (!clientReady || !client?.trim()) {
+      setTwChartRows([]);
+      setTwPosts([]);
+      setTwMeta({});
+      setTwLoading(false);
+      return;
+    }
+    try {
+      setTwLoading(true);
+      setTwRefreshInfo("");
+      if (opts?.refreshFirst) {
+        setTwRefreshing(true);
+        const params = new URLSearchParams({ client, range });
+        const refreshRes = await fetch(withClientQuery(`${getApiBase()}/sentiment/twitter-narratives/refresh?${params.toString()}`, client), {
+          method: "POST",
+        });
+        const refreshJson = await refreshRes.json().catch(() => null);
+        if (!refreshRes.ok) {
+          const detail =
+            (refreshJson?.detail as string) ||
+            (refreshJson?.message as string) ||
+            (typeof refreshJson === "string" ? refreshJson : "");
+          throw new Error(detail || `HTTP ${refreshRes.status}`);
+        }
+        const fetched = refreshJson?.counts?.fetched ?? 0;
+        const inserted = refreshJson?.counts?.inserted ?? 0;
+        const updated = refreshJson?.counts?.updated ?? 0;
+        const skipped = refreshJson?.counts?.skipped ?? 0;
+        const smt = refreshJson?.counts?.skipped_missing_text ?? 0;
+        const smu = refreshJson?.counts?.skipped_missing_url ?? 0;
+        const sbs = refreshJson?.counts?.skipped_bad_shape ?? 0;
+        const previewKeys = Array.isArray(refreshJson?.first_item_preview?.keys)
+          ? (refreshJson.first_item_preview.keys as string[]).slice(0, 12).join(", ")
+          : "";
+        const previewType = (refreshJson?.first_item_preview?.type as string) || "";
+        setTwRefreshInfo(
+          `Fetched ${fetched}, inserted ${inserted}, updated ${updated}, skipped ${skipped} (no text ${smt}, no url ${smu}, bad shape ${sbs}).`
+          + (previewType || previewKeys ? ` First item: type=${previewType || "?"}, keys=[${previewKeys || "?"}]` : "")
+        );
+      }
+      const params = new URLSearchParams({ client, range });
+      if (effectiveEntity) params.set("entity", effectiveEntity);
+      if (sentimentFilter) params.set("sentiment", sentimentFilter);
+      const res = await fetch(withClientQuery(`${getApiBase()}/sentiment/twitter-narratives?${params.toString()}`, client));
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setTwChartRows((data?.chart_rows ?? []) as TwitterNarrativeChartRow[]);
+      setTwPosts((data?.posts ?? []) as TwitterNarrativePost[]);
+      setTwMeta((data?.narrative_meta ?? {}) as NarrativeMeta);
+    } catch (e) {
+      setTwChartRows([]);
+      setTwPosts([]);
+      setTwMeta({});
+      const msg = e instanceof Error ? e.message : String(e);
+      setTwRefreshInfo(msg ? `Refresh failed: ${msg}` : "Refresh failed. Check backend logs and APIFY_API_KEY.");
+    } finally {
+      setTwLoading(false);
+      setTwRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    loadTwitterNarratives();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client, range, effectiveEntity, sentimentFilter, clientReady]);
 
   if (!clientReady || !client) {
     return (
@@ -186,6 +335,20 @@ export default function SentimentPage() {
                 ))}
               </select>
             </div>
+            <div className="flex items-center gap-2">
+              <label className="text-sm font-medium text-zinc-400">Source</label>
+              <select
+                value={surface}
+                onChange={(e) => setSurface(e.target.value)}
+                className="px-3 py-2 rounded-lg bg-zinc-800 border border-zinc-700 text-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-600 min-w-[140px]"
+              >
+                {SOURCE_OPTIONS.map((s) => (
+                  <option key={s.value} value={s.value}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
         </section>
 
@@ -217,10 +380,527 @@ export default function SentimentPage() {
               </div>
             </div>
 
+            <section className="rounded-xl border border-zinc-800 bg-zinc-900/30 p-4 mb-6">
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+                <div>
+                  <h2 className="text-lg font-semibold text-zinc-100">Narrative sentiment by taxonomy</h2>
+                  <p className="text-xs text-zinc-500 mt-0.5">
+                    X-axis is <span className="font-medium text-zinc-300">narrative_taxonomy.yaml</span> tag IDs. Each narrative shows client + competitors stacked by sentiment.
+                  </p>
+                </div>
+                <div className="text-xs text-zinc-500">
+                  Source: <span className="text-zinc-300 font-medium">{surface}</span>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-4 mb-3 text-xs text-zinc-500">
+                <span className="font-medium text-zinc-400">Legend</span>
+                <span className="inline-flex items-center gap-2">
+                  <span className="w-3 h-3 rounded bg-emerald-600" />
+                  Positive
+                </span>
+                <span className="inline-flex items-center gap-2">
+                  <span className="w-3 h-3 rounded bg-zinc-500" />
+                  Neutral
+                </span>
+                <span className="inline-flex items-center gap-2">
+                  <span className="w-3 h-3 rounded bg-rose-600" />
+                  Negative
+                </span>
+                <span className="inline-flex items-center gap-2">
+                  <span className="w-3 h-3 rounded-full border border-zinc-600" />
+                  Entity marker (client vs competitors)
+                </span>
+              </div>
+
+              {nsLoading ? (
+                <div className="py-10 text-center text-zinc-500">Loading narrative sentiment…</div>
+              ) : Object.keys(nsMeta || {}).length === 0 ? (
+                <div className="py-10 text-center text-zinc-500">
+                  No narrative sentiment yet for this source/range. (For Reddit/YouTube this will appear after posts exist in <span className="text-zinc-300 font-medium">social_posts</span>.)
+                </div>
+              ) : (
+                (() => {
+                  // Build dense, viewport-fitting grouped-stacked bar chart in SVG.
+                  const narrativeIds = Object.keys(nsMeta || {}).sort();
+                  const entityList = entities.length ? entities : [];
+                  const byKey = new Map<string, NarrativeSentimentRow>();
+                  for (const r of nsRows) {
+                    if (!r?.narrative || !r?.entity) continue;
+                    byKey.set(`${r.narrative}__${r.entity}`, r);
+                  }
+
+                  // y scale: max total per (narrative, entity)
+                  let yMax = 1;
+                  for (const nid of narrativeIds) {
+                    for (const e of entityList) {
+                      const row = byKey.get(`${nid}__${e}`);
+                      yMax = Math.max(yMax, row?.total || 0);
+                    }
+                  }
+                  if (yMax < 1) yMax = 1;
+
+                  const W = 1200; // viewBox width (scales responsively)
+                  const H = 360; // viewBox height
+                  const padL = 48;
+                  const padR = 16;
+                  const padT = 14;
+                  const padB = 70;
+                  const plotW = W - padL - padR;
+                  const plotH = H - padT - padB;
+
+                  const n = Math.max(1, narrativeIds.length);
+                  const groupW = plotW / n;
+                  const innerGap = 2;
+                  const barCount = Math.max(1, entityList.length);
+                  const barW = Math.max(1, Math.floor((groupW - innerGap * (barCount - 1)) / barCount));
+
+                  const y = (v: number) => padT + plotH - (v / yMax) * plotH;
+                  const h = (v: number) => (v / yMax) * plotH;
+
+                  const tickEvery = n > 50 ? 10 : n > 25 ? 5 : n > 12 ? 2 : 1;
+
+                  return (
+                    <div className="w-full">
+                      <div className="rounded-lg border border-zinc-800 bg-zinc-950/30 p-2">
+                        <svg
+                          viewBox={`0 0 ${W} ${H}`}
+                          className="w-full h-[360px]"
+                          role="img"
+                          aria-label="Narrative sentiment grouped stacked bar chart"
+                        >
+                          {/* Axes */}
+                          <line x1={padL} y1={padT} x2={padL} y2={padT + plotH} stroke="#3f3f46" strokeWidth="1" />
+                          <line x1={padL} y1={padT + plotH} x2={padL + plotW} y2={padT + plotH} stroke="#3f3f46" strokeWidth="1" />
+
+                          {/* Y ticks */}
+                          {[0, 0.25, 0.5, 0.75, 1].map((p) => {
+                            const val = Math.round(yMax * p);
+                            const yy = y(val);
+                            return (
+                              <g key={p}>
+                                <line x1={padL} y1={yy} x2={padL + plotW} y2={yy} stroke="#27272a" strokeWidth="1" />
+                                <text x={padL - 6} y={yy + 4} textAnchor="end" fontSize="10" fill="#a1a1aa">
+                                  {val}
+                                </text>
+                              </g>
+                            );
+                          })}
+
+                          {/* Bars */}
+                          {narrativeIds.map((nid, i) => {
+                            const x0 = padL + i * groupW;
+                            return (
+                              <g key={nid}>
+                                {entityList.map((e, j) => {
+                                  const row =
+                                    byKey.get(`${nid}__${e}`) ||
+                                    ({ narrative: nid, entity: e, positive: 0, neutral: 0, negative: 0, total: 0 } as NarrativeSentimentRow);
+
+                                  const bx = x0 + j * (barW + innerGap);
+                                  const total = row.total || 0;
+                                  const pos = row.positive || 0;
+                                  const neu = row.neutral || 0;
+                                  const neg = row.negative || 0;
+
+                                  const entityStroke = getEntityHex(e);
+                                  let yCursor = padT + plotH;
+                                  const segs: Array<{ k: "positive" | "neutral" | "negative"; v: number; color: string }> = [
+                                    { k: "positive", v: pos, color: "#16a34a" },
+                                    { k: "neutral", v: neu, color: "#71717a" },
+                                    { k: "negative", v: neg, color: "#e11d48" },
+                                  ];
+
+                                  return (
+                                    <g key={e}>
+                                      {/* outline so each entity is visible */}
+                                      <rect
+                                        x={bx}
+                                        y={y(total)}
+                                        width={barW}
+                                        height={Math.max(0, h(total))}
+                                        fill="transparent"
+                                        stroke={entityStroke}
+                                        strokeWidth="1"
+                                      />
+                                      {segs.map((s) => {
+                                        if (s.v <= 0) return null;
+                                        const segH = h(s.v);
+                                        yCursor -= segH;
+                                        return (
+                                          <rect
+                                            key={s.k}
+                                            x={bx}
+                                            y={yCursor}
+                                            width={barW}
+                                            height={segH}
+                                            fill={s.color}
+                                          >
+                                            <title>
+                                              {nid} • {e}\nTotal: {total}\nPositive: {pos}\nNeutral: {neu}\nNegative: {neg}
+                                            </title>
+                                          </rect>
+                                        );
+                                      })}
+                                    </g>
+                                  );
+                                })}
+
+                                {/* X labels (skip to fit viewport) */}
+                                {i % tickEvery === 0 ? (
+                                  <text
+                                    x={x0 + groupW / 2}
+                                    y={padT + plotH + 16}
+                                    textAnchor="middle"
+                                    fontSize="9"
+                                    fill="#a1a1aa"
+                                  >
+                                    {nid}
+                                  </text>
+                                ) : null}
+                              </g>
+                            );
+                          })}
+
+                          {/* Entity legend (dots) */}
+                          <g transform={`translate(${padL}, ${padT + plotH + 34})`}>
+                            {entityList.slice(0, 6).map((e, idx) => {
+                              const xx = idx * 190;
+                              const hex = getEntityHex(e);
+                              return (
+                                <g key={e} transform={`translate(${xx}, 0)`}>
+                                  <circle cx="6" cy="6" r="5" fill={hex} stroke="#3f3f46" strokeWidth="1" />
+                                  <text x="16" y="10" fontSize="10" fill="#d4d4d8">
+                                    {e}
+                                  </text>
+                                </g>
+                              );
+                            })}
+                            {entityList.length > 6 ? (
+                              <text x={6 * 190} y={10} fontSize="10" fill="#a1a1aa">
+                                +{entityList.length - 6} more…
+                              </text>
+                            ) : null}
+                          </g>
+                        </svg>
+                      </div>
+                      <div className="mt-2 text-xs text-zinc-500">
+                        Hover bars for exact counts. X-axis labels are auto-skipped to fit the viewport (all narratives are still included in the chart).
+                      </div>
+
+                      {/* Matrix table: every taxonomy x every entity (no guessing) */}
+                      <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-950/30 overflow-hidden">
+                        <div className="px-3 py-2 border-b border-zinc-800 flex items-center justify-between">
+                          <div className="text-sm font-semibold text-zinc-200">Narrative per company</div>
+                          <div className="text-xs text-zinc-500">
+                            <span className="inline-flex items-center gap-2 mr-3">
+                              <span className="w-3 h-3 rounded bg-emerald-600" /> Positive
+                            </span>
+                            <span className="inline-flex items-center gap-2 mr-3">
+                              <span className="w-3 h-3 rounded bg-zinc-500" /> Neutral
+                            </span>
+                            <span className="inline-flex items-center gap-2">
+                              <span className="w-3 h-3 rounded bg-rose-600" /> Negative
+                            </span>
+                          </div>
+                        </div>
+                        <div className="max-h-[520px] overflow-auto">
+                          <table className="min-w-[980px] w-full text-left text-sm">
+                            <thead className="sticky top-0 bg-zinc-900/80 backdrop-blur border-b border-zinc-800">
+                              <tr>
+                                <th className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-zinc-300 w-[260px]">
+                                  Narrative
+                                </th>
+                                {entityList.map((e) => (
+                                  <th key={e} className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-zinc-300">
+                                    <span className="inline-flex items-center gap-2">
+                                      <span
+                                        className="w-2.5 h-2.5 rounded-full border border-zinc-700"
+                                        style={{ backgroundColor: getEntityHex(e) }}
+                                      />
+                                      {e}
+                                    </span>
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-zinc-800">
+                              {narrativeIds.map((nid) => {
+                                const meta = nsMeta?.[nid] || {};
+                                const label = (meta.label || nid).trim();
+                                const narrativeTone =
+                                  label.toLowerCase().includes("risk") || label.toLowerCase().includes("fraud") || label.toLowerCase().includes("scam")
+                                    ? "border-l-rose-600/70 bg-rose-500/5"
+                                    : label.toLowerCase().includes("growth") || label.toLowerCase().includes("launch") || label.toLowerCase().includes("product")
+                                      ? "border-l-emerald-600/70 bg-emerald-500/5"
+                                      : "border-l-zinc-600/70 bg-zinc-500/5";
+                                return (
+                                  <tr key={nid} className={"hover:bg-zinc-900/30 border-l-2 " + narrativeTone}>
+                                    <td className="px-3 py-2 align-top">
+                                      <div className="text-xs text-zinc-400" title={nid}>{nid}</div>
+                                      <div className="text-sm font-medium text-zinc-100 line-clamp-2" title={label}>{label}</div>
+                                    </td>
+                                    {entityList.map((e) => {
+                                      const row =
+                                        byKey.get(`${nid}__${e}`) ||
+                                        ({ narrative: nid, entity: e, positive: 0, neutral: 0, negative: 0, total: 0 } as NarrativeSentimentRow);
+                                      const total = row.total || 0;
+                                      const pos = row.positive || 0;
+                                      const neu = row.neutral || 0;
+                                      const neg = row.negative || 0;
+                                      const denom = total || 1;
+                                      const wPos = (pos / denom) * 100;
+                                      const wNeu = (neu / denom) * 100;
+                                      const wNeg = (neg / denom) * 100;
+                                      return (
+                                        <td key={e} className="px-3 py-2 align-top">
+                                          <div className="flex items-center gap-2">
+                                            <div
+                                              className="flex-1 h-4 rounded overflow-hidden bg-zinc-800 border border-zinc-700"
+                                              title={`${nid} • ${e}\nTotal: ${total}\nPositive: ${pos}\nNeutral: ${neu}\nNegative: ${neg}`}
+                                            >
+                                              {total > 0 ? (
+                                                <div className="w-full h-full flex">
+                                                  {wPos > 0 ? (
+                                                    <div
+                                                      className="h-full"
+                                                      style={{ width: `${wPos}%`, backgroundColor: "#16a34a" }}
+                                                    />
+                                                  ) : null}
+                                                  {wNeu > 0 ? (
+                                                    <div
+                                                      className="h-full"
+                                                      style={{ width: `${wNeu}%`, backgroundColor: "#71717a" }}
+                                                    />
+                                                  ) : null}
+                                                  {wNeg > 0 ? (
+                                                    <div
+                                                      className="h-full"
+                                                      style={{ width: `${wNeg}%`, backgroundColor: "#e11d48" }}
+                                                    />
+                                                  ) : null}
+                                                  {wPos === 0 && wNeu === 0 && wNeg === 0 ? (
+                                                    <div className="h-full" style={{ width: "100%", backgroundColor: "#71717a" }} />
+                                                  ) : null}
+                                                </div>
+                                              ) : (
+                                                <div className="h-full bg-zinc-800" style={{ width: "100%" }} />
+                                              )}
+                                            </div>
+                                            <div className="w-8 text-right text-xs text-zinc-500 tabular-nums">{total}</div>
+                                          </div>
+                                        </td>
+                                      );
+                                    })}
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()
+              )}
+            </section>
+
+            <section className="rounded-xl border border-zinc-800 bg-zinc-900/30 p-4 mb-6">
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+                <div>
+                  <h2 className="text-lg font-semibold text-zinc-100">Twitter narrative sentiment (Apify)</h2>
+                  <p className="text-xs text-zinc-500 mt-0.5">
+                    Narratives come from <span className="font-medium text-zinc-300">narrative_taxonomy.yaml</span>. Tweets are fetched via Apify and stored in MongoDB.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => loadTwitterNarratives({ refreshFirst: true })}
+                    disabled={twRefreshing || !clientReady}
+                    className={`px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                      twRefreshing
+                        ? "bg-zinc-800 text-zinc-500 border-zinc-700 cursor-not-allowed"
+                        : "bg-zinc-800 text-zinc-200 border-zinc-700 hover:bg-zinc-700"
+                    }`}
+                  >
+                    {twRefreshing ? "Refreshing…" : "Refresh tweets"}
+                  </button>
+                </div>
+              </div>
+              {twRefreshInfo ? (
+                <div className="mb-3 text-xs text-zinc-400">
+                  {twRefreshInfo}
+                </div>
+              ) : null}
+
+              {twLoading ? (
+                <div className="py-10 text-center text-zinc-500">Loading Twitter narratives…</div>
+              ) : twChartRows.length === 0 ? (
+                <div className="py-10 text-center text-zinc-500">
+                  No Twitter narrative data yet. Click <span className="text-zinc-300 font-medium">Refresh tweets</span> to fetch from Apify.
+                </div>
+              ) : (
+                <>
+                  {/* Column chart: X = narrative id; within each column, per-entity stacked sentiment bar */}
+                  <div className="overflow-x-auto pb-2">
+                    <div className="grid grid-flow-col auto-cols-[240px] gap-3 min-h-[280px]">
+                      {(() => {
+                        const byNarr = new Map<string, Record<string, TwitterNarrativeChartRow>>();
+                        let maxTotal = 1;
+                        for (const r of twChartRows) {
+                          if (!r?.narrative) continue;
+                          if (!byNarr.has(r.narrative)) byNarr.set(r.narrative, {});
+                          byNarr.get(r.narrative)![r.entity] = r;
+                          maxTotal = Math.max(maxTotal, r.total || 0);
+                        }
+                        const narrativeIds = Array.from(byNarr.keys()).sort();
+                        return narrativeIds.map((nid) => {
+                          const meta = twMeta?.[nid] || {};
+                          const label = (meta.label || nid).trim();
+                          const entMap = byNarr.get(nid) || {};
+                          return (
+                            <div key={nid} className="rounded-lg border border-zinc-800 bg-zinc-950/30 p-3">
+                              <div className="mb-2">
+                                <div className="text-xs text-zinc-400 line-clamp-1" title={nid}>
+                                  {nid}
+                                </div>
+                                <div className="text-sm font-semibold text-zinc-100 line-clamp-2" title={label}>
+                                  {label}
+                                </div>
+                              </div>
+                              <div className="space-y-2">
+                                {entities.map((e) => {
+                                  const row = entMap[e];
+                                  if (!row || row.total <= 0) return null;
+                                  const pctPos = (row.positive / (row.total || 1)) * 100;
+                                  const pctNeu = (row.neutral / (row.total || 1)) * 100;
+                                  const pctNeg = (row.negative / (row.total || 1)) * 100;
+                                  const heightPx = Math.max(10, Math.round((row.total / maxTotal) * 26));
+                                  return (
+                                    <div key={e} className="flex items-center gap-2">
+                                      <div className="w-20 text-[11px] text-zinc-400 truncate" title={e}>
+                                        {e}
+                                      </div>
+                                      <div className="flex-1">
+                                        <div
+                                          className="w-full flex rounded overflow-hidden bg-zinc-800"
+                                          style={{ height: `${heightPx}px` }}
+                                          title={`${e}: ${row.total} tweets (pos ${row.positive}, neu ${row.neutral}, neg ${row.negative})`}
+                                        >
+                                          {pctPos > 0 && <div className="h-full bg-emerald-600" style={{ width: `${pctPos}%` }} />}
+                                          {pctNeu > 0 && <div className="h-full bg-zinc-500" style={{ width: `${pctNeu}%` }} />}
+                                          {pctNeg > 0 && <div className="h-full bg-rose-600" style={{ width: `${pctNeg}%` }} />}
+                                        </div>
+                                      </div>
+                                      <div className="w-10 text-right text-[11px] text-zinc-500 tabular-nums">{row.total}</div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                              {meta.description ? (
+                                <div className="mt-2 text-[11px] text-zinc-500 line-clamp-2" title={meta.description}>
+                                  {meta.description}
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* Posts table */}
+                  <div className="mt-5">
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-sm font-semibold text-zinc-300">Tweet details</h3>
+                      <span className="text-xs text-zinc-500">{twPosts.length} rows (latest)</span>
+                    </div>
+                    <div className="overflow-auto rounded-lg border border-zinc-800">
+                      <table className="min-w-[980px] w-full text-left text-sm">
+                        <thead className="bg-zinc-900/60 text-zinc-300">
+                          <tr>
+                            <th className="px-3 py-2 text-xs font-semibold uppercase tracking-wider">Date</th>
+                            <th className="px-3 py-2 text-xs font-semibold uppercase tracking-wider">Entity</th>
+                            <th className="px-3 py-2 text-xs font-semibold uppercase tracking-wider">Narrative</th>
+                            <th className="px-3 py-2 text-xs font-semibold uppercase tracking-wider">Sentiment</th>
+                            <th className="px-3 py-2 text-xs font-semibold uppercase tracking-wider">Engagement</th>
+                            <th className="px-3 py-2 text-xs font-semibold uppercase tracking-wider">Text</th>
+                            <th className="px-3 py-2 text-xs font-semibold uppercase tracking-wider">Link</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-zinc-800 bg-zinc-950/30">
+                          {twPosts.map((p, idx) => {
+                            const nid = p.narrative_primary || "";
+                            const meta = nid ? (twMeta?.[nid] || {}) : {};
+                            const narrLabel = nid ? (meta.label || nid) : "—";
+                            const d = p.timestamp ? new Date(p.timestamp) : null;
+                            const when = d ? d.toLocaleString() : "";
+                            const likes = p.engagement?.likes ?? 0;
+                            const rts = p.engagement?.retweets ?? 0;
+                            const cmts = p.engagement?.comments ?? 0;
+                            const s = (p.sentiment || "neutral").toLowerCase();
+                            const sClass =
+                              s === "positive"
+                                ? "text-emerald-400"
+                                : s === "negative"
+                                  ? "text-rose-400"
+                                  : "text-zinc-300";
+                            return (
+                              <tr key={p.url || idx} className="hover:bg-zinc-900/40">
+                                <td className="px-3 py-2 text-xs text-zinc-500 whitespace-nowrap">{when}</td>
+                                <td className="px-3 py-2 text-zinc-200 whitespace-nowrap">{p.entity}</td>
+                                <td className="px-3 py-2 text-zinc-300">
+                                  {nid ? (
+                                    <span title={nid}>{narrLabel}</span>
+                                  ) : (
+                                    <span className="text-zinc-600">Unclassified</span>
+                                  )}
+                                </td>
+                                <td className={`px-3 py-2 font-medium whitespace-nowrap ${sClass}`}>{s}</td>
+                                <td className="px-3 py-2 text-xs text-zinc-500 whitespace-nowrap tabular-nums">
+                                  ❤ {likes} · ↻ {rts} · 💬 {cmts}
+                                </td>
+                                <td className="px-3 py-2 text-zinc-300 max-w-[520px]">
+                                  <span className="line-clamp-2">{p.text}</span>
+                                </td>
+                                <td className="px-3 py-2">
+                                  {p.url ? (
+                                    <a
+                                      href={p.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-zinc-300 hover:text-white"
+                                    >
+                                      Open →
+                                    </a>
+                                  ) : (
+                                    <span className="text-zinc-600">—</span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </>
+              )}
+            </section>
+
             <section className="rounded-xl border border-zinc-800 bg-zinc-900/30 p-4">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-zinc-100">Article mentions</h2>
-                <span className="text-sm text-zinc-500">{mentions.length} articles</span>
+                <h2 className="text-lg font-semibold text-zinc-100">
+                  {surface === "reddit"
+                    ? "Reddit discussions"
+                    : surface === "youtube"
+                      ? "YouTube videos"
+                      : surface === "forums"
+                        ? "Forum mentions"
+                        : surface === "news"
+                          ? "News mentions"
+                          : "All mentions"}
+                </h2>
+                <span className="text-sm text-zinc-500">{mentions.length} items</span>
               </div>
               {loadingMentions ? (
                 <div className="py-16 text-center text-zinc-500">Loading mentions…</div>

@@ -76,6 +76,7 @@ async def run_social_monitor() -> dict[str, int]:
                 "content_hash": content_hash,
                 "engagement": post.get("engagement", {}),
                 "published_at": ts_bson,
+                "timestamp": ts_bson,
             }
             await coll.insert_one(doc)
             inserted += 1

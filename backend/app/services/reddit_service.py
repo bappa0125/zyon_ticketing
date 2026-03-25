@@ -74,6 +74,8 @@ def fetch_reddit_mentions() -> list[dict[str, Any]]:
             if url and not url.startswith("http"):
                 url = f"https://reddit.com{url}" if url.startswith("/") else ""
 
+            subreddit = item.get("subreddit") or item.get("subredditName") or item.get("subreddit_name") or ""
+
             score = (
                 item.get("score")
                 or item.get("upVotes")
@@ -115,6 +117,10 @@ def fetch_reddit_mentions() -> list[dict[str, Any]]:
             results.append({
                 "platform": "reddit",
                 "entity": entity,
+                # Keep structured fields so UI can show "discussion thread" cleanly.
+                "title": (title or "")[:300],
+                "body": (body or "")[:700],
+                "subreddit": (subreddit or "")[:80],
                 "text": text[:500],
                 "url": (url or "")[:500],
                 "engagement": {"likes": int(score), "retweets": 0, "comments": int(num_comments)},

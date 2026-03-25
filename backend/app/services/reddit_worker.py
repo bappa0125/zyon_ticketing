@@ -65,6 +65,9 @@ async def run_reddit_monitor() -> dict[str, int]:
             doc = {
                 "platform": "reddit",
                 "entity": entity,
+                "title": (post.get("title") or "")[:300],
+                "body": (post.get("body") or "")[:1200],
+                "subreddit": (post.get("subreddit") or "")[:80],
                 "text": (text or "")[:500],
                 "url": (post.get("url") or "")[:500],
                 "content_hash": content_hash,

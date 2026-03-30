@@ -1,0 +1,68 @@
+verticals:
+  broker:
+    description: "Retail broking & capital markets platforms (trading, F&O, demat, execution, onboarding)."
+    categories:
+      - id: platform_reliability
+        label: "Platform reliability & outages"
+        description: "App downtime, order failures, lag, login issues, chart issues, system stability."
+      - id: pricing_fees
+        label: "Pricing, fees & hidden charges"
+        description: "Brokerage, DP charges, AMC, pricing transparency, cost comparisons."
+      - id: fno_risk_leverage
+        label: "F&O risk, leverage & losses"
+        description: "Options trading losses, leverage, risk management, margin rules, retail behavior."
+      - id: education_advice_quality
+        label: "Education, signals & advice quality"
+        description: "Trading signals, influencer advice, courses, misinformation, strategy discussions."
+      - id: trust_compliance
+        label: "Trust, compliance & safety"
+        description: "Fraud, scam brokers, compliance, KYC issues, data security, regulatory concerns."
+
+  fintech:
+    description: "Consumer fintech products (payments, wallets, lending fintech, apps, neo-banking)."
+    categories:
+      - id: trust_safety
+        label: "Trust & safety"
+        description: "Fraud, scams, customer support failure, data leaks, reliability."
+      - id: onboarding_kyc
+        label: "Onboarding & KYC friction"
+        description: "KYC failures, verification delays, account freezes, documentation issues."
+      - id: pricing_value
+        label: "Pricing & value"
+        description: "Fees, interest rates, unclear pricing, hidden charges."
+      - id: product_gaps
+        label: "Product gaps & UX pain"
+        description: "Missing features, poor UX, confusing flows, app bugs."
+
+  nbfc:
+    description: "NBFCs and lending institutions (credit risk, collections, rates, NPA, underwriting)."
+    categories:
+      - id: credit_risk_npa
+        label: "Credit risk, NPA & underwriting"
+        description: "Delinquencies, NPAs, underwriting quality, asset quality, risk controls."
+      - id: collections_recovery
+        label: "Collections & recovery"
+        description: "Collections behavior, recovery processes, customer experience."
+      - id: rates_pricing
+        label: "Rates & pricing fairness"
+        description: "Interest rates, pricing transparency, fees, consumer complaints."
+      - id: macro_liquidity
+        label: "Macro/liquidity conditions"
+        description: "Funding costs, liquidity, policy shifts impacting lending."
+
+  bank:
+    description: "Banks (PSU/private): policy, trust, service reliability, credit cycles, macro impact."
+    categories:
+      - id: psu_bank_narratives
+        label: "PSU bank narratives"
+        description: "Public sector banks, reforms, governance, recapitalization, perceptions."
+      - id: service_reliability
+        label: "Service reliability & support"
+        description: "Outages, support issues, service failures, customer complaints."
+      - id: credit_cycle
+        label: "Credit cycle & asset quality"
+        description: "NPA concerns, provisioning, lending risk, macro impact."
+      - id: policy_tax_macro
+        label: "Policy/tax/macro"
+        description: "Policy changes, taxation, inflation, GDP, geopolitical and macro narratives."
+

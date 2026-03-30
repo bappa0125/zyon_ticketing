@@ -35,18 +35,33 @@ def load_monitoring_yaml() -> dict[str, Any]:
     return {}
 
 
+def load_verticals_yaml() -> dict[str, Any]:
+    """Load vertical categories config (bundle-aware)."""
+    try:
+        from app.core.vertical_config_bundle import resolve_verticals_config_path
+
+        path = resolve_verticals_config_path()
+    except Exception:
+        path = _get_config_dir() / "verticals.yaml"
+    if path.exists():
+        with open(path) as f:
+            return yaml.safe_load(f) or {}
+    return {}
+
 class Settings(BaseSettings):
     app_env: str = Field(default="dev", alias="APP_ENV")
     mongodb_url: str = Field(default="mongodb://mongodb:27017", alias="MONGODB_URL")
     redis_url: str = Field(default="redis://redis:6379/0", alias="REDIS_URL")
     qdrant_url: str = Field(default="http://qdrant:6333", alias="QDRANT_URL")
     openrouter_api_key: str = Field(default="", alias="OPENROUTER_API_KEY")
+    openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
     openrouter_model: str = Field(default="openrouter/free", alias="OPENROUTER_MODEL")
     tavily_api_key: str = Field(default="", alias="TAVILY_API_KEY")
     hf_token: str = Field(default="", alias="HF_TOKEN")
     mock_llm: bool = Field(default=False, alias="MOCK_LLM")
     apify_api_key: str = Field(default="", alias="APIFY_API_KEY")
     youtube_api_key: str = Field(default="", alias="YOUTUBE_API_KEY")
+    scrapingant_api_key: str = Field(default="", alias="SCRAPINGANT_API_KEY")
 
     class Config:
         env_file = ".env"
@@ -70,9 +85,11 @@ def get_config() -> dict[str, Any]:
         "url_discovery": base.get("url_discovery", {}),
         "media_mention": base.get("media_mention", {}),
         "monitoring": load_monitoring_yaml().get("monitoring", {}),
+        "verticals": load_verticals_yaml().get("verticals", {}),
         "chat": base.get("chat", {}),
         "scheduler": base.get("scheduler", {}),
         "reddit_trending": base.get("reddit_trending", {}),
+        "narrative_strategy_engine": base.get("narrative_strategy_engine") if isinstance(base.get("narrative_strategy_engine"), dict) else {},
         "youtube_trending": base.get("youtube_trending") if isinstance(base.get("youtube_trending"), dict) else {},
         "youtube_official": base.get("youtube_official") if isinstance(base.get("youtube_official"), dict) else {},
         "narrative_shift": base.get("narrative_shift") if isinstance(base.get("narrative_shift"), dict) else {},

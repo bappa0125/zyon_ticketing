@@ -9,6 +9,7 @@ import Link from "next/link";
 import { getApiBase, withClientQuery } from "@/lib/api";
 import { useActiveClient } from "@/context/ClientContext";
 import { getEntityHex } from "@/lib/entityColors";
+import { NarrativeDashboard } from "@/components/NarrativeIntelligence/NarrativeDashboard";
 
 const RANGE_OPTIONS = [
   { value: "24h", label: "24h" },
@@ -63,6 +64,33 @@ type NarrativeSentimentRow = {
   total: number;
 };
 
+type RedditTractionRow = {
+  entity: string;
+  narrative: string;
+  total: number;
+  engagement: number;
+  subreddit_count: number;
+  subreddits: string[];
+  origin_subreddit?: string;
+  amplifier_subreddit?: string;
+  stage?: string;
+  surface_counts?: Record<string, number>;
+  recommendations?: string[];
+  evidence?: { url: string; title?: string; subreddit?: string; snippet?: string; score?: number }[];
+};
+
+type NarrativeStrategyRow = {
+  narrative: string;
+  theme: string;
+  sentiment: string;
+  strength: string;
+  relevance_to_company: string;
+  company_presence: string;
+  gap: string;
+  recommended_action: string;
+  content_direction: string;
+};
+
 export default function SentimentPage() {
   const { clientName: client, activeClient, ready: clientReady } = useActiveClient();
   const [competitor, setCompetitor] = useState<string>("");
@@ -86,11 +114,30 @@ export default function SentimentPage() {
   const [nsRows, setNsRows] = useState<NarrativeSentimentRow[]>([]);
   const [nsMeta, setNsMeta] = useState<NarrativeMeta>({});
 
+  const [rtLoading, setRtLoading] = useState(true);
+  const [rtRows, setRtRows] = useState<RedditTractionRow[]>([]);
+
+  const [nsCompany, setNsCompany] = useState<string>("");
+  const [nsClientType, setNsClientType] = useState<string>("Broker");
+  const [nsExecLoading, setNsExecLoading] = useState<boolean>(false);
+  const [nsExecRows, setNsExecRows] = useState<NarrativeStrategyRow[]>([]);
+  const [nsExecError, setNsExecError] = useState<string>("");
+
   const entities = useMemo(() => {
     if (!activeClient) return [];
     return [activeClient.name, ...(activeClient.competitors ?? [])];
   }, [activeClient]);
   const effectiveEntity = competitorFilter.trim() || competitor;
+
+  const dashboardCompanies = useMemo(() => {
+    if (!activeClient) return [];
+    const all = [activeClient.name, ...(activeClient.competitors ?? [])].filter(Boolean);
+    const preferred = ["Sahi", "Zerodha", "Dhan", "Groww", "Kotak Securities"];
+    const out: string[] = [];
+    for (const p of preferred) if (all.includes(p)) out.push(p);
+    for (const a of all) if (!out.includes(a)) out.push(a);
+    return out.slice(0, 5);
+  }, [activeClient]);
 
   useEffect(() => {
     if (!clientReady || !client?.trim()) {
@@ -161,6 +208,22 @@ export default function SentimentPage() {
       })
       .finally(() => setNsLoading(false));
   }, [client, range, clientReady, surface, effectiveEntity, sentimentFilter]);
+
+  useEffect(() => {
+    if (!clientReady || !client?.trim()) {
+      setRtRows([]);
+      setRtLoading(false);
+      return;
+    }
+    setRtLoading(true);
+    const params = new URLSearchParams({ client, range });
+    if (effectiveEntity) params.set("entity", effectiveEntity);
+    fetch(withClientQuery(`${getApiBase()}/sentiment/reddit-traction?${params.toString()}`, client))
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
+      .then((data) => setRtRows((data?.rows ?? []) as RedditTractionRow[]))
+      .catch(() => setRtRows([]))
+      .finally(() => setRtLoading(false));
+  }, [client, range, clientReady, effectiveEntity]);
 
   const loadTwitterNarratives = async (opts?: { refreshFirst?: boolean }) => {
     if (!clientReady || !client?.trim()) {
@@ -264,7 +327,10 @@ export default function SentimentPage() {
       </nav>
 
       <div className="max-w-7xl mx-auto p-4 md:p-6">
-        <header className="mb-6">
+        {/* Narrative Intelligence: first screen — must stay above classic Sentiment blocks */}
+        <NarrativeDashboard client={client} companies={dashboardCompanies} />
+
+        <header className="mb-6 mt-2">
           <h1 className="text-2xl font-semibold text-zinc-100">Sentiment Analysis</h1>
           <p className="text-sm text-zinc-500 mt-1">
             Media tone for client and competitors. View counts and article-level mentions.
@@ -884,6 +950,247 @@ export default function SentimentPage() {
                     </div>
                   </div>
                 </>
+              )}
+            </section>
+
+            <section className="rounded-xl border border-zinc-800 bg-zinc-900/30 p-4 mb-6">
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+                <div>
+                  <h2 className="text-lg font-semibold text-zinc-100">Reddit narrative traction</h2>
+                  <p className="text-xs text-zinc-500 mt-0.5">
+                    Cross-subreddit narrative signals (origin, amplification, stage) with evidence links.
+                  </p>
+                </div>
+                <div className="text-xs text-zinc-500">
+                  Uses <span className="text-zinc-300 font-medium">public Reddit JSON</span> + your{" "}
+                  <span className="text-zinc-300 font-medium">narrative taxonomy</span>.
+                </div>
+              </div>
+
+              {rtLoading ? (
+                <div className="py-12 text-center text-zinc-500">Loading Reddit traction…</div>
+              ) : rtRows.length === 0 ? (
+                <div className="py-12 text-center text-zinc-500">
+                  No Reddit narrative traction yet for the selected client/range. Run the ingest script, then refresh.
+                </div>
+              ) : (
+                <div className="rounded-lg border border-zinc-800 overflow-hidden">
+                  <div className="max-h-[520px] overflow-auto">
+                    <table className="min-w-[980px] w-full text-left text-sm">
+                      <thead className="sticky top-0 bg-zinc-900/80 backdrop-blur border-b border-zinc-800">
+                        <tr>
+                          <th className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-zinc-300">Narrative</th>
+                          <th className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-zinc-300">Entity</th>
+                          <th className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-zinc-300 text-right">Mentions</th>
+                          <th className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-zinc-300 text-right">Engagement</th>
+                          <th className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-zinc-300">Stage</th>
+                          <th className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-zinc-300">Origin → Amplified</th>
+                          <th className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-zinc-300">Gaps / Next actions</th>
+                          <th className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-zinc-300">Evidence</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-800">
+                        {rtRows.slice(0, 80).map((r, idx) => {
+                          const sc = r.surface_counts || {};
+                          const gaps = [
+                            (sc.news || 0) > 0 ? null : "news",
+                            (sc.forums || 0) > 0 ? null : "forums",
+                            (sc.youtube || 0) > 0 ? null : "youtube",
+                          ].filter(Boolean) as string[];
+                          const stage = (r.stage || "unknown").toLowerCase();
+                          const stageColor =
+                            stage === "growing"
+                              ? "bg-emerald-500/15 text-emerald-200 border-emerald-600/40"
+                              : stage === "declining"
+                                ? "bg-rose-500/15 text-rose-200 border-rose-600/40"
+                                : stage === "emerging"
+                                  ? "bg-amber-500/15 text-amber-200 border-amber-600/40"
+                                  : "bg-zinc-500/10 text-zinc-200 border-zinc-600/40";
+                          const ev = (r.evidence || []).slice(0, 2);
+                          return (
+                            <tr key={`${r.narrative}__${r.entity}__${idx}`} className="hover:bg-zinc-900/30">
+                              <td className="px-3 py-2 align-top">
+                                <div className="text-xs text-zinc-400" title={r.narrative}>
+                                  {r.narrative}
+                                </div>
+                                <div className="text-sm font-medium text-zinc-100">
+                                  {(nsMeta?.[r.narrative]?.label || r.narrative) as string}
+                                </div>
+                              </td>
+                              <td className="px-3 py-2 align-top">
+                                <span className="inline-flex items-center gap-2">
+                                  <span
+                                    className="w-2.5 h-2.5 rounded-full border border-zinc-700"
+                                    style={{ backgroundColor: getEntityHex(r.entity) }}
+                                  />
+                                  <span className="text-zinc-200">{r.entity}</span>
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 align-top text-right tabular-nums text-zinc-200">{r.total}</td>
+                              <td className="px-3 py-2 align-top text-right tabular-nums text-zinc-400">{r.engagement}</td>
+                              <td className="px-3 py-2 align-top">
+                                <span className={`inline-flex px-2 py-1 rounded border text-xs ${stageColor}`}>{stage}</span>
+                              </td>
+                              <td className="px-3 py-2 align-top text-xs text-zinc-300">
+                                <div className="text-zinc-400">
+                                  r/{(r.origin_subreddit || "—").toString()}
+                                </div>
+                                <div className="text-zinc-300">
+                                  → r/{(r.amplifier_subreddit || "—").toString()}
+                                </div>
+                                <div className="text-[11px] text-zinc-500 mt-1">
+                                  {r.subreddit_count} subs
+                                </div>
+                              </td>
+                              <td className="px-3 py-2 align-top text-xs">
+                                <div className="text-zinc-400 mb-1">
+                                  Gaps: {gaps.length ? gaps.join(", ") : "none"}
+                                </div>
+                                <div className="space-y-1">
+                                  {(r.recommendations || []).slice(0, 2).map((rec, i) => (
+                                    <div key={i} className="text-zinc-200">
+                                      - {rec}
+                                    </div>
+                                  ))}
+                                </div>
+                              </td>
+                              <td className="px-3 py-2 align-top text-xs">
+                                {ev.length ? (
+                                  <div className="space-y-1">
+                                    {ev.map((e, i) => (
+                                      <div key={i}>
+                                        <a
+                                          href={e.url}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="text-zinc-300 hover:text-white"
+                                          title={e.snippet || ""}
+                                        >
+                                          {e.subreddit ? `r/${e.subreddit} • ` : ""}
+                                          {(e.title || "Open post").slice(0, 68)}
+                                          {(e.title || "").length > 68 ? "…" : ""}
+                                        </a>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <span className="text-zinc-600">—</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="px-3 py-2 border-t border-zinc-800 text-xs text-zinc-500">
+                    Showing top {Math.min(80, rtRows.length)} by engagement. Stage = emerging/growing/mature/declining from time buckets in the selected range.
+                  </div>
+                </div>
+              )}
+            </section>
+
+            <section className="rounded-xl border border-zinc-800 bg-zinc-900/30 p-4 mb-6">
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+                <div>
+                  <h2 className="text-lg font-semibold text-zinc-100">Narrative Strategy Engine (Reddit)</h2>
+                  <p className="text-xs text-zinc-500 mt-0.5">
+                    Theme-first narratives → gaps → actions. No stock recommendations.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2 items-center mb-3">
+                <input
+                  value={nsCompany}
+                  onChange={(e) => setNsCompany(e.target.value)}
+                  placeholder="Company (e.g., SBI, Paytm, Bajaj Finance)"
+                  className="w-full md:w-[420px] px-3 py-2 rounded-lg bg-zinc-950/40 border border-zinc-800 text-zinc-200 placeholder:text-zinc-600"
+                />
+                <select
+                  value={nsClientType}
+                  onChange={(e) => setNsClientType(e.target.value)}
+                  className="px-3 py-2 rounded-lg bg-zinc-950/40 border border-zinc-800 text-zinc-200"
+                >
+                  <option value="Bank">Bank</option>
+                  <option value="NBFC">NBFC</option>
+                  <option value="Fintech">Fintech</option>
+                  <option value="Broker">Broker</option>
+                </select>
+                <button
+                  disabled={nsExecLoading || !nsCompany.trim()}
+                  onClick={() => {
+                    const company = nsCompany.trim();
+                    setNsExecError("");
+                    setNsExecLoading(true);
+                    fetch(
+                      withClientQuery(
+                        `${getApiBase()}/narrative-strategy/reddit/engine?company=${encodeURIComponent(company)}&vertical=${encodeURIComponent(
+                          nsClientType.toLowerCase()
+                        )}&limit=8&use_llm=false`,
+                        client
+                      )
+                    )
+                      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
+                      .then((data) => setNsExecRows((data ?? []) as NarrativeStrategyRow[]))
+                      .catch((e) => {
+                        setNsExecRows([]);
+                        setNsExecError(String(e?.message || e || "Failed"));
+                      })
+                      .finally(() => setNsExecLoading(false));
+                  }}
+                  className={`px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                    nsExecLoading || !nsCompany.trim()
+                      ? "bg-zinc-800 text-zinc-500 border-zinc-700 cursor-not-allowed"
+                      : "bg-zinc-800 text-zinc-200 border-zinc-700 hover:bg-zinc-700"
+                  }`}
+                >
+                  {nsExecLoading ? "Generating…" : "Generate strategy"}
+                </button>
+                <div className="text-xs text-zinc-500 ml-auto">Range (for context): {range}</div>
+              </div>
+
+              {nsExecError ? <div className="text-xs text-rose-300 mb-2">{nsExecError}</div> : null}
+
+              {nsExecLoading ? (
+                <div className="py-10 text-center text-zinc-500">Generating narrative strategy…</div>
+              ) : nsExecRows.length === 0 ? (
+                <div className="py-8 text-center text-zinc-500">
+                  Enter a company and generate. Make sure Reddit ingest has run recently.
+                </div>
+              ) : (
+                <div className="rounded-lg border border-zinc-800 overflow-hidden">
+                  <div className="max-h-[520px] overflow-auto">
+                    <table className="min-w-[980px] w-full text-left text-sm">
+                      <thead className="sticky top-0 bg-zinc-900/80 backdrop-blur border-b border-zinc-800">
+                        <tr>
+                          <th className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-zinc-300">Theme</th>
+                          <th className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-zinc-300">Narrative</th>
+                          <th className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-zinc-300">Sentiment</th>
+                          <th className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-zinc-300">Strength</th>
+                          <th className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-zinc-300">Presence</th>
+                          <th className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-zinc-300">Gap</th>
+                          <th className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-zinc-300">Recommended action</th>
+                          <th className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-zinc-300">Content direction</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-800">
+                        {nsExecRows.map((r, i) => (
+                          <tr key={i} className="hover:bg-zinc-900/30 align-top">
+                            <td className="px-3 py-2 text-zinc-200 font-medium">{r.theme}</td>
+                            <td className="px-3 py-2 text-zinc-200">{r.narrative}</td>
+                            <td className="px-3 py-2 text-zinc-300">{r.sentiment}</td>
+                            <td className="px-3 py-2 text-zinc-300">{r.strength}</td>
+                            <td className="px-3 py-2 text-zinc-300">{r.company_presence}</td>
+                            <td className="px-3 py-2 text-zinc-300">{r.gap}</td>
+                            <td className="px-3 py-2 text-zinc-200">{r.recommended_action}</td>
+                            <td className="px-3 py-2 text-zinc-300">{r.content_direction}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               )}
             </section>
 

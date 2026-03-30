@@ -4,11 +4,11 @@ Backs up all data stores into the project `data_backup/` directory so you can co
 
 ## What is backed up
 
-| Store    | Contents                    | Backup path                    |
-|----------|-----------------------------|---------------------------------|
-| MongoDB  | `chat` database             | `data_backup/<timestamp>/mongodb/chat.archive` |
-| Redis    | Cache/session data          | `data_backup/<timestamp>/redis/dump.rdb`       |
-| Qdrant   | Vector DB (embeddings)      | `data_backup/<timestamp>/qdrant/full.snapshot` |
+| Store   | Contents               | Backup path                                      |
+|---------|------------------------|--------------------------------------------------|
+| MongoDB | `chat` database        | `data_backup/<timestamp>/mongodb/chat.archive`   |
+| Redis   | Cache/session data     | `data_backup/<timestamp>/redis/dump.rdb`         |
+| Qdrant  | Vector DB (embeddings) | `data_backup/<timestamp>/qdrant/full.snapshot`   |
 
 ## Run once
 
@@ -20,9 +20,43 @@ From the project root (where `docker-compose.yml` is):
 
 Output goes to `data_backup/YYYYMMDD_HHMMSS/`. Upload that folder to Google Drive.
 
+## Reddit narrative traction (cheap-first)
+
+To ingest Reddit trending posts into `social_posts` (powers the Sentiment page “Reddit narrative traction” section):
+
+```bash
+docker compose exec -T backend python scripts/run_reddit_trending_social_ingest.py
+```
+
+This uses **Reddit public JSON** (no API key), runs entity detection + taxonomy tagging downstream, and stores:
+
+- `platform=reddit`
+- `pipeline=reddit_trending`
+- `subreddit`, `reddit_id`, `engagement`, `published_at`
+
+## Narrative Strategy Engine (Reddit)
+
+This is the “consulting-style” narrative output for a company (theme-first, then map to company, then gaps+actions).
+
+### 1) Ingest Reddit (posts + top comments, no company filtering)
+
+```bash
+docker compose exec -T backend python scripts/run_narrative_strategy_reddit_ingest.py
+```
+
+This stores raw data into Mongo collection configured at:
+
+- `config/dev.yaml` → `narrative_strategy_engine.mongodb.raw_collection`
+
+### 2) Generate strategy output (API)
+
+```bash
+curl "http://localhost:8000/api/narrative-strategy/reddit?company=SBI&client_type=Bank&limit=8"
+```
+
 ## Run every hour
 
-**Option A – cron (recommended)**
+### Option A – cron (recommended)
 
 ```bash
 crontab -e
@@ -30,7 +64,7 @@ crontab -e
 0 * * * * /path/to/zyon_ai_ticketing/scripts/run_data_backup.sh
 ```
 
-**Option B – long-running loop**
+### Option B – long-running loop
 
 ```bash
 ./scripts/run_data_backup_hourly.sh

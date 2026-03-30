@@ -129,15 +129,31 @@ reddit_trending:
   enabled: true
   # Subreddits: India + global trading/investing
   subreddits:
-    - IndianStreetBets
+    # Primary signal sources (India)
     - IndiaInvestments
+    - IndianStreetBets
     - IndianStockMarket
+    - StockMarketIndia
+    - IndianInvesting
+    # High-signal (underrated)
+    - DalalStreetTalks
+    - IndianTraders
+    - AlgoTrading
+    - InvestingIndia
+    - PersonalFinanceIndia
+    # Macro + policy
+    - IndianEconomy
+    - IndiaEconomy
+    - IndiaTax
+    # Fintech + startup
+    - StartUpIndia
+    - Fintech
+    - CryptoIndia
+    # Global early signals
     - stocks
     - investing
-    - wallstreetbets
     - options
-    - BogleHeads
-    - StockMarket
+    - wallstreetbets
   sort: hot          # hot | new | top
   top_period: day    # day | week (only if sort=top)
   posts_per_subreddit: 20
@@ -161,6 +177,102 @@ reddit_trending:
     max_tokens_sahi: 400
   # Scheduler
   fetch_interval_minutes: 45
+
+# Narrative Strategy Engine (Reddit → Themes → Gaps → Actions)
+# Consulting-oriented output: "what you are missing and what to do next".
+narrative_strategy_engine:
+  enabled: true
+  # UI responsiveness: cap how many posts we embed+cluster per request.
+  # Increase later if you have more CPU/RAM and want higher recall.
+  strategy_max_items: 120
+  # Uses Reddit public JSON endpoints (no API key). Avoids paid APIs until throttled/blocked.
+  reddit:
+    subreddits:
+      # Keep in sync with reddit_trending by default; override per environment if needed.
+      - IndiaInvestments
+      - IndianStreetBets
+      - IndianStockMarket
+      - StockMarketIndia
+      - IndianInvesting
+      - DalalStreetTalks
+      - IndianTraders
+      - AlgoTrading
+      - InvestingIndia
+      - PersonalFinanceIndia
+      - IndianEconomy
+      - IndiaTax
+      - StartUpIndia
+      - Fintech
+      - CryptoIndia
+      - stocks
+      - investing
+      - options
+      - wallstreetbets
+    sort: hot
+    top_period: day
+    posts_per_subreddit: 25
+    delay_seconds_between_subreddits: 1.5
+    user_agent: "ZyonNarrativeStrategy/1.0"
+    # Comments fetch: for each post, fetch top N comments via /comments/{id}.json
+    fetch_top_comments: true
+    top_comments_per_post: 8
+    max_posts_total_per_run: 500
+    max_comments_total_per_run: 2500
+    scrapingant:
+      enabled: true
+      daily_cap_calls: 50
+      # Try direct reddit.com first; if blocked/throttled retry through ScrapingAnt.
+      fallback_statuses: [429, 403]
+      # Keep this off by default so we don't burn the 50/day cap on comment threads.
+      use_for_comments: false
+      use_for_listings: true
+  mongodb:
+    database: chat
+    raw_collection: narrative_strategy_reddit_raw
+  embeddings:
+    # Online clustering threshold (cosine similarity). Higher = fewer, tighter themes.
+    cluster_similarity_threshold: 0.82
+    max_items_for_clustering: 800
+  scoring:
+    # Strength = volume + engagement_weight * engagement
+    engagement_weight: 0.02
+  sector_mapping:
+    # If no specific company/entity is relevant → MARKET
+    market_entity: "MARKET"
+    # Map sector narratives to entities (config driven). You can expand these over time.
+    groups:
+      PSU_BANKS:
+        keywords: ["psu bank", "psu banks", "public sector bank", "public sector banks"]
+        entities: ["SBI", "PNB", "Bank of Baroda", "Canara Bank", "Union Bank of India"]
+      NBFC_LENDING:
+        keywords: ["nbfc", "lending risk", "npa", "asset quality", "collection", "delinquency"]
+        entities: ["Bajaj Finance", "HDFC", "ICICI", "Paytm"]
+      BROKING_CAPITAL_MARKETS:
+        keywords: ["broker", "broking", "kite", "zerodha", "upstox", "groww", "dhan", "angel one", "f&o", "options"]
+        entities: ["Zerodha", "Upstox", "Groww", "Dhan", "Kotak Securities", "Angel One"]
+  actions:
+    # Action templates used when a gap is detected. Keep business-friendly; never stock tips.
+    templates:
+      news: "Write/pitch a news article explaining the narrative, address key concerns, and cite evidence."
+      forums: "Post a detailed answer on ValuePickr/TradingQnA clarifying misconceptions with data and examples."
+      youtube: "Publish a short explainer video (5–8 min) with a clear POV + concrete examples; link to deeper write-up."
+      reddit: "Comment on the highest-engagement thread with a crisp stance + evidence; ask one strong follow-up question."
+      x: "Post a concise thread summarizing the narrative, your POV, and a link to a deeper asset."
+  llm:
+    enabled: true
+    # Hybrid consulting-grade:
+    # - draft_model (cheap) via OpenRouter (e.g., DeepSeek)
+    # - fallback_model (premium) via OpenAI when draft is generic/invalid
+    # NOTE: OpenAI fallback is currently hitting quota (429 insufficient_quota),
+    # so keep this on draft to still get LLM output without premium fallback.
+    mode: draft   # off | draft | hybrid | premium
+    draft_model: deepseek/deepseek-chat
+    fallback_model: gpt-4o-mini
+    max_tokens: 900
+    # Guardrails for cost and reliability (approximate $ cap)
+    max_clusters_llm_per_run: 10
+    max_premium_fallbacks_per_run: 4
+    max_premium_fallbacks_per_day: 12
 
 # YouTube narrative pipeline — daily trading/finance narrative from video metadata (no comments)
 youtube_trending:

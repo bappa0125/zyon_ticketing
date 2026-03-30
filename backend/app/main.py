@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from app.api import chat, history, crawler, system_metrics, url_search, media_search, coverage, clients_api, media_api, sentiment_api, topics_api, coverage_api, opportunity_api, social_api, media_intelligence_api, reports_api, pr_intelligence_api, pr_reports_api
+from app.api import chat, history, crawler, system_metrics, url_search, media_search, coverage, clients_api, media_api, sentiment_api, topics_api, coverage_api, opportunity_api, social_api, media_intelligence_api, reports_api, pr_intelligence_api, pr_reports_api, narrative_strategy_api
 from app.core.logging import setup_logging, get_logger
 from app.core.vertical_config_bundle import normalize_bundle_name, request_config_bundle
 from app.core.health import router as health_router
@@ -34,6 +34,14 @@ async def lifespan(app: FastAPI):
         await ensure_ingestion_indexes()
         from app.core.ingestion_scheduler import start_scheduler, stop_scheduler
         start_scheduler()
+        # Warm up embeddings so first UI request doesn't time out.
+        try:
+            from app.services.embedding_service import get_encoder
+
+            get_encoder()
+            logger.info("Embedding model warmed")
+        except Exception as e:
+            logger.warning("Embedding warmup failed", error=str(e))
     except Exception as e:
         logger.exception("Startup failed (app will run but some features may be broken): %s", e)
     yield
@@ -113,6 +121,7 @@ app.include_router(pr_intelligence_api.router, prefix="/api")
 app.include_router(pr_reports_api.router, prefix="/api")
 app.include_router(opportunity_api.router, prefix="/api")
 app.include_router(social_api.router, prefix="/api")
+app.include_router(narrative_strategy_api.router, prefix="/api")
 app.include_router(system_metrics.router)
 app.include_router(health_router, tags=["health"])
 app.include_router(metrics_router, tags=["metrics"])

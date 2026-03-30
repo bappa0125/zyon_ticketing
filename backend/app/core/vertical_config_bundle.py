@@ -69,6 +69,13 @@ def resolve_bundled_config_file(filename: str) -> Path:
     return base / filename
 
 
+def resolve_verticals_config_path() -> Path:
+    """
+    Resolve config/verticals.yaml (per-bundle override supported).
+    """
+    return resolve_bundled_config_file("verticals.yaml")
+
+
 def clients_redis_cache_key() -> str:
     """Redis key for async load_clients — include bundle to avoid cross-vertical pollution."""
     b = get_effective_config_bundle() or "default"

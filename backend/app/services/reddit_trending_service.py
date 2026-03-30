@@ -18,6 +18,9 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
+# social_posts schema constant (kept local to avoid circular imports)
+SOCIAL_POSTS_COLLECTION = "social_posts"
+
 # --- Config helpers ----------------------------------------------------------
 
 def _cfg() -> dict[str, Any]:
@@ -105,6 +108,11 @@ def _normalize_post(raw: dict, subreddit: str) -> dict[str, Any] | None:
     except Exception as e:
         logger.debug("reddit_trending_normalize_skip", error=str(e))
         return None
+
+
+def _engagement_score(score: int, num_comments: int) -> int:
+    # Very cheap heuristic: comments are higher-signal than upvotes.
+    return int(score or 0) + (3 * int(num_comments or 0))
 
 
 async def fetch_trending_posts() -> list[dict[str, Any]]:
@@ -199,6 +207,115 @@ async def save_summary_to_mongo(themes: list[dict], sahi_suggestions: list[dict]
         await coll.insert_one(doc)
     except Exception as e:
         logger.warning("reddit_trending_summary_save_failed", error=str(e))
+
+
+# --- Social posts (for narrative/sentiment UI) --------------------------------
+
+async def ingest_posts_to_social_posts(posts: list[dict[str, Any]]) -> dict[str, int]:
+    """
+    Persist Reddit trending posts into `social_posts` so existing Sentiment + Narrative pipelines can use them.
+    This is intentionally lightweight and uses:
+    - entity detection (clients.yaml + config aliases)
+    - existing narrative/sentiment backfills downstream (sentiment_api already backfills on read)
+    """
+    cfg = _cfg()
+    if not cfg.get("enabled", True):
+        return {"inserted": 0, "updated": 0, "skipped": 0}
+    if not posts:
+        return {"inserted": 0, "updated": 0, "skipped": 0}
+
+    from app.services.mongodb import get_mongo_client, get_db
+    from app.core.hash_utils import generate_content_hash
+    from app.services.entity_detection_service import detect_entity
+
+    await get_mongo_client()
+    db = get_db()
+    coll = db[SOCIAL_POSTS_COLLECTION]
+
+    inserted = 0
+    updated = 0
+    skipped = 0
+    now = datetime.now(timezone.utc)
+
+    for p in posts:
+        try:
+            subreddit = (p.get("subreddit") or "").strip()
+            title = (p.get("title") or "").strip()
+            body = (p.get("body_snippet") or "").strip()
+            url = (p.get("url") or "").strip()
+            reddit_id = (p.get("reddit_id") or "").strip()
+            score = int(p.get("score") or 0)
+            num_comments = int(p.get("num_comments") or 0)
+
+            text = " ".join([t for t in (title, body) if t]).strip()
+            if not text:
+                skipped += 1
+                continue
+
+            entity = detect_entity(text)
+            if not entity:
+                skipped += 1
+                continue
+
+            published_at = None
+            created = (p.get("created_utc") or "").strip()
+            if created:
+                try:
+                    published_at = datetime.fromisoformat(created.replace("Z", "+00:00"))
+                except Exception:
+                    published_at = now
+            else:
+                published_at = now
+
+            content_hash = generate_content_hash(text[:500])
+            engagement = {
+                "likes": score,
+                "retweets": 0,
+                "comments": num_comments,
+                "score": _engagement_score(score, num_comments),
+            }
+
+            # Dedup/upsert by (platform, pipeline, reddit_id) when available, else by URL.
+            filt: dict[str, Any] = {"platform": "reddit", "pipeline": "reddit_trending"}
+            if reddit_id:
+                filt["reddit_id"] = reddit_id
+            elif url:
+                filt["url"] = url
+            else:
+                skipped += 1
+                continue
+
+            doc = {
+                "platform": "reddit",
+                "pipeline": "reddit_trending",
+                "entity": entity,
+                "subreddit": subreddit[:80],
+                "reddit_id": reddit_id[:20],
+                "title": title[:300],
+                "body": body[:1200],
+                "text": text[:500],
+                "url": url[:500],
+                "engagement": engagement,
+                "content_hash": content_hash,
+                "published_at": published_at,
+                "fetched_at": now,
+            }
+
+            res = await coll.update_one(filt, {"$set": doc}, upsert=True)
+            if getattr(res, "upserted_id", None):
+                inserted += 1
+            elif getattr(res, "modified_count", 0) > 0:
+                updated += 1
+            else:
+                skipped += 1
+        except Exception as e:
+            logger.debug("reddit_trending_social_upsert_failed", error=str(e))
+            skipped += 1
+
+    if inserted or updated:
+        logger.info("reddit_trending_social_ingest_complete", inserted=inserted, updated=updated, skipped=skipped)
+
+    return {"inserted": inserted, "updated": updated, "skipped": skipped}
 
 
 # --- Redis (reddit_trending:* keys) -------------------------------------------
@@ -418,3 +535,16 @@ async def run_reddit_trending_pipeline() -> dict[str, Any]:
     await save_sahi_to_redis(sahi)
     await save_summary_to_mongo(themes, sahi)
     return result
+
+
+async def run_reddit_trending_social_ingest() -> dict[str, Any]:
+    """
+    Fetch Reddit trending posts and upsert into `social_posts` (no LLM).
+    Designed for cheap, reliable ingestion that powers narrative traction UI.
+    """
+    cfg = _cfg()
+    if not cfg.get("enabled", True):
+        return {"ok": False, "reason": "reddit_trending disabled"}
+    posts = await fetch_trending_posts()
+    stats = await ingest_posts_to_social_posts(posts)
+    return {"ok": True, "posts_fetched": len(posts), **stats}

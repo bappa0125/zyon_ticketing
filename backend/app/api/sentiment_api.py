@@ -350,6 +350,317 @@ async def get_sentiment_summary(
 MENTIONS_LIMIT = 150
 
 
+def _stage_from_buckets(counts: list[int]) -> str:
+    """
+    Very lightweight stage detection.
+    counts are ordered oldest -> newest.
+    """
+    xs = [int(c or 0) for c in (counts or []) if c is not None]
+    if not xs:
+        return "unknown"
+    if sum(xs) <= 2:
+        return "emerging"
+    n = len(xs)
+    if n < 3:
+        return "mature"
+    first = max(1, sum(xs[: max(1, n // 2)]))
+    last = sum(xs[n // 2 :])
+    if last >= 2 * first:
+        return "growing"
+    if last <= first // 2:
+        return "declining"
+    peak = max(xs)
+    tail = sum(xs[-max(1, n // 4) :])
+    if peak > 0 and tail <= max(1, peak // 4):
+        return "declining"
+    return "mature"
+
+
+@router.get("/sentiment/reddit-traction")
+async def get_reddit_narrative_traction(
+    client: str = Query(..., description="Client name (to resolve client + competitors)"),
+    range_param: str = Query("7d", alias="range", description="24h | 7d | 30d"),
+    entity: Optional[str] = Query(None, description="Optional entity filter"),
+):
+    """
+    Reddit narrative traction:
+    - Uses `social_posts` where platform=reddit (includes reddit_monitor + reddit_trending ingestion).
+    - Returns narrative-level metrics including cross-subreddit spread and simple stage.
+    - Includes evidence posts (URLs) so UI can link out.
+    """
+    from app.services.narrative_tagging_service import tag_text_for_narratives
+    from app.services.sentiment_service import analyze_sentiment
+
+    await get_mongo_client()
+    from app.services.mongodb import get_db
+
+    db = get_db()
+    coll = db[SOCIAL_POSTS]
+    cutoff = datetime.now(timezone.utc) - _parse_range(range_param)
+
+    entities = await _resolve_entities_for_client(client)
+    q: dict[str, Any] = {
+        "platform": "reddit",
+        "$or": [{"published_at": {"$gte": cutoff}}, {"timestamp": {"$gte": cutoff}}],
+    }
+    if entities:
+        q["entity"] = {"$in": entities}
+    if entity and entity.strip():
+        q["entity"] = entity.strip()
+
+    # Ensure narrative_primary + sentiment exist for Reddit posts (cheap, cached back to Mongo).
+    cursor = coll.find(q).sort([("published_at", -1), ("timestamp", -1)]).limit(1200)
+    async for doc in cursor:
+        needs_update = False
+        s = (doc.get("sentiment") or "").strip().lower()
+        if s not in ("positive", "neutral", "negative"):
+            label, score = analyze_sentiment((doc.get("text") or "")[:2000])
+            doc["sentiment"] = label
+            doc["sentiment_score"] = score
+            needs_update = True
+        np = (doc.get("narrative_primary") or "").strip()
+        if not np:
+            text = (doc.get("text") or "").strip()
+            tags, primary = tag_text_for_narratives(text)
+            if primary:
+                doc["narrative_tags"] = tags
+                doc["narrative_primary"] = primary
+                needs_update = True
+        if needs_update:
+            try:
+                await coll.update_one(
+                    {"_id": doc["_id"]},
+                    {"$set": {k: v for k, v in doc.items() if k in ("sentiment", "sentiment_score", "narrative_tags", "narrative_primary")}},
+                )
+            except Exception:
+                pass
+
+    match = dict(q)
+    match["narrative_primary"] = {"$exists": True, "$ne": None, "$ne": ""}
+
+    pipeline = [
+        {"$match": match},
+        {
+            "$addFields": {
+                "subreddit_norm": {"$toLower": {"$ifNull": ["$subreddit", ""]}},
+                "eng_score": {
+                    "$add": [
+                        {"$ifNull": ["$engagement.likes", 0]},
+                        {"$multiply": [{"$ifNull": ["$engagement.comments", 0]}, 3]},
+                    ]
+                },
+                "ts": {"$ifNull": ["$published_at", "$timestamp"]},
+            }
+        },
+        # First: group by (entity, narrative, subreddit) to find amplification hotspots
+        {
+            "$group": {
+                "_id": {"entity": "$entity", "narrative": "$narrative_primary", "subreddit": "$subreddit_norm"},
+                "total": {"$sum": 1},
+                "engagement": {"$sum": "$eng_score"},
+                "first_ts": {"$min": "$ts"},
+                "last_ts": {"$max": "$ts"},
+                "evidence": {
+                    "$push": {
+                        "url": "$url",
+                        "title": "$title",
+                        "text": "$text",
+                        "subreddit": "$subreddit",
+                        "score": "$eng_score",
+                        "ts": "$ts",
+                    }
+                },
+            }
+        },
+        # Second: roll up to (entity, narrative)
+        {
+            "$group": {
+                "_id": {"entity": "$_id.entity", "narrative": "$_id.narrative"},
+                "total": {"$sum": "$total"},
+                "engagement": {"$sum": "$engagement"},
+                "subreddits": {"$addToSet": "$_id.subreddit"},
+                "first_ts": {"$min": "$first_ts"},
+                "last_ts": {"$max": "$last_ts"},
+                # Find origin + amplifier at subreddit level
+                "origin_subreddit": {"$min": "$_id.subreddit"},
+                "subreddit_rollups": {
+                    "$push": {
+                        "subreddit": "$_id.subreddit",
+                        "total": "$total",
+                        "engagement": "$engagement",
+                        "first_ts": "$first_ts",
+                        "last_ts": "$last_ts",
+                        "evidence": "$evidence",
+                    }
+                },
+            }
+        },
+        {"$sort": {"engagement": -1, "total": -1}},
+        {"$limit": 120},
+    ]
+
+    rows: list[dict[str, Any]] = []
+    async for doc in coll.aggregate(pipeline):
+        rollups = doc.get("subreddit_rollups") or []
+        # pick origin subreddit as earliest first_ts, amplifier as max engagement
+        origin_sub = ""
+        amplifier_sub = ""
+        try:
+            if rollups:
+                rollups_sorted_origin = sorted(
+                    rollups,
+                    key=lambda r: r.get("first_ts") or datetime.now(timezone.utc),
+                )
+                origin_sub = (rollups_sorted_origin[0].get("subreddit") or "") if rollups_sorted_origin else ""
+                rollups_sorted_amp = sorted(rollups, key=lambda r: int(r.get("engagement") or 0), reverse=True)
+                amplifier_sub = (rollups_sorted_amp[0].get("subreddit") or "") if rollups_sorted_amp else ""
+        except Exception:
+            origin_sub = ""
+            amplifier_sub = ""
+
+        # evidence: flatten and keep top by score
+        ev: list[dict[str, Any]] = []
+        for rr in rollups:
+            ev.extend(rr.get("evidence") or [])
+        ev.sort(key=lambda x: int(x.get("score") or 0), reverse=True)
+        ev = ev[:5]
+        subreddits = [s for s in (doc.get("subreddits") or []) if s]
+        rows.append(
+            {
+                "entity": (doc.get("_id") or {}).get("entity", ""),
+                "narrative": (doc.get("_id") or {}).get("narrative", ""),
+                "total": int(doc.get("total") or 0),
+                "engagement": int(doc.get("engagement") or 0),
+                "subreddit_count": len(subreddits),
+                "subreddits": subreddits[:12],
+                "origin_subreddit": origin_sub,
+                "amplifier_subreddit": amplifier_sub,
+                "first_ts": doc.get("first_ts").isoformat() if hasattr(doc.get("first_ts"), "isoformat") else str(doc.get("first_ts") or ""),
+                "last_ts": doc.get("last_ts").isoformat() if hasattr(doc.get("last_ts"), "isoformat") else str(doc.get("last_ts") or ""),
+                "evidence": [
+                    {
+                        "url": (x.get("url") or "")[:500],
+                        "title": (x.get("title") or "")[:200],
+                        "subreddit": (x.get("subreddit") or "")[:80],
+                        "snippet": (x.get("text") or "")[:220],
+                        "score": int(x.get("score") or 0),
+                    }
+                    for x in ev
+                    if x.get("url")
+                ],
+            }
+        )
+
+    stage_map: dict[str, str] = {}
+    try:
+        r = range_param.strip().lower()
+        if r == "24h":
+            bucket = "hour"
+        elif r == "30d":
+            bucket = "week"
+        else:
+            bucket = "day"
+        ts_expr = {"$ifNull": ["$published_at", "$timestamp"]}
+        buck = {
+            "hour": {"$dateToString": {"format": "%Y-%m-%dT%H:00:00Z", "date": ts_expr}},
+            "day": {"$dateToString": {"format": "%Y-%m-%d", "date": ts_expr}},
+            "week": {"$dateToString": {"format": "%G-W%V", "date": ts_expr}},
+        }[bucket]
+        pipe2 = [
+            {"$match": match},
+            {"$group": {"_id": {"n": "$narrative_primary", "b": buck}, "c": {"$sum": 1}}},
+            {"$sort": {"_id.b": 1}},
+        ]
+        by_n: dict[str, list[int]] = {}
+        async for d in coll.aggregate(pipe2):
+            nid = (d.get("_id") or {}).get("n", "")
+            by_n.setdefault(nid, []).append(int(d.get("c") or 0))
+        for nid, counts in by_n.items():
+            stage_map[nid] = _stage_from_buckets(counts)
+    except Exception:
+        stage_map = {}
+
+    for rr in rows:
+        rr["stage"] = stage_map.get(rr.get("narrative") or "", "unknown")
+
+    # Cross-source gap scoring (cheap counts for the narratives we return)
+    from app.config import get_config
+
+    action_cfg = (get_config().get("narrative_actions") or {}) if isinstance(get_config(), dict) else {}
+    default_actions = {
+        "news": "Write/pitch a news article explaining the narrative and addressing the key concern.",
+        "forums": "Post a detailed answer on ValuePickr/TradingQnA with evidence + a clear stance.",
+        "youtube": "Publish a short explainer video (5–8 min) with concrete examples and a CTA to your product/content.",
+        "reddit": "Seed a discussion or comment directly on the highest-engagement thread with data + a crisp take.",
+        "x": "Post a short thread summarizing the narrative + what’s wrong + what to do; link to deeper content.",
+    }
+    actions = {**default_actions, **(action_cfg.get("templates") or {})} if isinstance(action_cfg, dict) else default_actions
+
+    narrative_ids = sorted({r.get("narrative") for r in rows if r.get("narrative")})
+    surface_counts: dict[str, dict[str, int]] = {nid: {} for nid in narrative_ids}
+    try:
+        # entity_mentions: news/forums
+        em = db[ENTITY_MENTIONS]
+        for nid in narrative_ids:
+            em_match = {
+                "narrative_primary": nid,
+                "$or": [{"published_at": {"$gte": cutoff}}, {"timestamp": {"$gte": cutoff}}],
+            }
+            if entities:
+                em_match["entity"] = {"$in": entities}
+            if entity and entity.strip():
+                em_match["entity"] = entity.strip()
+            # news
+            try:
+                surface_counts[nid]["news"] = await em.count_documents({**em_match, "type": {"$ne": "forum"}})
+                surface_counts[nid]["forums"] = await em.count_documents({**em_match, "type": "forum"})
+            except Exception:
+                surface_counts[nid]["news"] = 0
+                surface_counts[nid]["forums"] = 0
+            # youtube
+            try:
+                surface_counts[nid]["youtube"] = await coll.count_documents(
+                    {
+                        "platform": "youtube",
+                        "narrative_primary": nid,
+                        "$or": [{"published_at": {"$gte": cutoff}}, {"timestamp": {"$gte": cutoff}}],
+                        **({"entity": {"$in": entities}} if entities else {}),
+                    }
+                )
+            except Exception:
+                surface_counts[nid]["youtube"] = 0
+            # reddit (all reddit, not just trending)
+            try:
+                surface_counts[nid]["reddit"] = await coll.count_documents(
+                    {
+                        "platform": "reddit",
+                        "narrative_primary": nid,
+                        "$or": [{"published_at": {"$gte": cutoff}}, {"timestamp": {"$gte": cutoff}}],
+                        **({"entity": {"$in": entities}} if entities else {}),
+                    }
+                )
+            except Exception:
+                surface_counts[nid]["reddit"] = 0
+    except Exception:
+        surface_counts = {nid: {} for nid in narrative_ids}
+
+    for rr in rows:
+        nid = rr.get("narrative") or ""
+        rr["surface_counts"] = surface_counts.get(nid, {})
+        recs: list[str] = []
+        sc = rr.get("surface_counts") or {}
+        # If narrative is moving on reddit but absent elsewhere, recommend bridging channels.
+        if int(sc.get("reddit") or 0) > 0 and int(sc.get("news") or 0) == 0:
+            recs.append(actions["news"])
+        if int(sc.get("reddit") or 0) > 0 and int(sc.get("forums") or 0) == 0:
+            recs.append(actions["forums"])
+        if int(sc.get("reddit") or 0) > 0 and int(sc.get("youtube") or 0) == 0:
+            recs.append(actions["youtube"])
+        rr["recommendations"] = recs[:3]
+
+    return {"ok": True, "client": client, "range": range_param, "cutoff": cutoff.isoformat(), "rows": rows}
+
+
 @router.get("/sentiment/mentions")
 async def get_sentiment_mentions(
     client: str = Query(..., description="Client name, e.g. Sahi"),

@@ -46,3 +46,36 @@ export function withClientQuery(pathWithOptionalQuery: string, client: string | 
   const qs = params.toString();
   return qs ? `${path}?${qs}` : path;
 }
+
+export type NarrativeApiItem = {
+  title: string;
+  narrative: string;
+  belief: string;
+  why_now: string;
+  confidence_score: number;
+  signal_strength: "strong" | "emerging";
+  vertical: string;
+  categories: string[];
+  relevance: string;
+  relevance_reason: string;
+  market_signal?: string;
+  companies: Record<string, { gap?: string; strategy?: string }>;
+  founder_mode: { what_to_say: string; channels: string[]; example_post: string };
+  pr_mode: {
+    core_message: string;
+    angle: string;
+    content_examples: { news_article?: string; social_post?: string; forum_response?: string };
+  };
+  evidence?: { url: string; title?: string; snippet?: string; subreddit?: string }[];
+  debug: { cluster_size: number; sample_posts: string[] };
+};
+
+export async function fetchNarratives(client: string, opts?: { limit?: number }): Promise<NarrativeApiItem[]> {
+  const params = new URLSearchParams();
+  params.set("limit", String(opts?.limit ?? 7));
+  const url = withClientQuery(`${getApiBase()}/narratives?${params.toString()}`, client);
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  return (Array.isArray(data) ? data : []) as NarrativeApiItem[];
+}

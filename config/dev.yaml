@@ -216,11 +216,19 @@ narrative_strategy_engine:
     # Comments fetch: for each post, fetch top N comments via /comments/{id}.json
     fetch_top_comments: true
     top_comments_per_post: 8
-    max_posts_total_per_run: 500
+    # Keep scheduled ingestion bounded (comment threads are expensive HTTP calls).
+    max_comment_fetch_requests_per_run: 25
+    max_comment_fetch_posts_per_subreddit: 3
+    ingest_timeout_seconds: 240
+    max_posts_total_per_run: 220
     max_comments_total_per_run: 2500
+    # Scheduler: how often to refresh narrative_strategy_reddit_raw in Mongo.
+    ingest_interval_minutes: 180
     scrapingant:
       enabled: true
       daily_cap_calls: 50
+      # Option B: if comments hit 429/403, fetch only a small capped number of comment threads via ScrapingAnt.
+      max_comment_fallbacks_per_run: 12
       # Try direct reddit.com first; if blocked/throttled retry through ScrapingAnt.
       fallback_statuses: [429, 403]
       # Keep this off by default so we don't burn the 50/day cap on comment threads.

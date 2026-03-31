@@ -246,6 +246,32 @@ def _job_reddit_trending():
         logger.exception("scheduler_job_failed", job="reddit_trending", error=str(e))
 
 
+def _job_narrative_strategy_reddit_ingest():
+    """Scheduled job: Narrative Strategy raw Reddit ingest (posts + top comments)."""
+    if _skip_if_backfill("narrative_strategy_reddit_ingest"):
+        return
+    try:
+        cfg = get_config()
+        nse = cfg.get("narrative_strategy_engine") or {}
+        if not isinstance(nse, dict) or not nse.get("enabled", True):
+            return
+        timeout_s = int(((nse.get("reddit") or {}) if isinstance(nse.get("reddit"), dict) else {}).get("ingest_timeout_seconds") or 240)
+    except Exception:
+        # If config fails, skip rather than crash scheduler loop.
+        return
+
+    from app.services.narrative_strategy_reddit_ingest import ingest_reddit_raw
+
+    logger.info("scheduler_job_start", job="narrative_strategy_reddit_ingest")
+    try:
+        result = asyncio.run(asyncio.wait_for(ingest_reddit_raw(), timeout=float(max(30, timeout_s))))
+        logger.info("scheduler_job_complete", job="narrative_strategy_reddit_ingest", result=result)
+    except asyncio.TimeoutError:
+        logger.warning("scheduler_job_timeout", job="narrative_strategy_reddit_ingest", timeout_seconds=int(max(30, timeout_s)))
+    except Exception as e:
+        logger.exception("scheduler_job_failed", job="narrative_strategy_reddit_ingest", error=str(e))
+
+
 def _job_narrative_positioning():
     """Scheduled job: PR-focused narrative positioning per client (1 LLM call per client)."""
     if _skip_if_backfill("narrative_positioning"):
@@ -261,6 +287,32 @@ def _job_narrative_positioning():
     except Exception as e:
         logger.exception("scheduler_job_failed", job="narrative_positioning", error=str(e))
 
+
+def _job_narrative_strategy_daily_full_run():
+    """Scheduled job: Daily full run (reddit ingest + narrative strategy engine) for broker vertical."""
+    if _skip_if_backfill("narrative_strategy_daily_full_run"):
+        return
+    try:
+        cfg = get_config()
+        nse = cfg.get("narrative_strategy_engine") or {}
+        if not isinstance(nse, dict) or not nse.get("enabled", True):
+            return
+    except Exception:
+        return
+    from app.services.narrative_strategy_reddit_ingest import ingest_reddit_raw
+    from app.services.narrative_strategy_engine import generate_narrative_strategy_v2
+
+    logger.info("scheduler_job_start", job="narrative_strategy_daily_full_run")
+    try:
+        ingest = asyncio.run(ingest_reddit_raw())
+        out = asyncio.run(generate_narrative_strategy_v2(company="default", vertical="broker", limit=8, use_llm=True))
+        logger.info(
+            "scheduler_job_complete",
+            job="narrative_strategy_daily_full_run",
+            result={"ingest": ingest, "narratives_returned": len(out)},
+        )
+    except Exception as e:
+        logger.exception("scheduler_job_failed", job="narrative_strategy_daily_full_run", error=str(e))
 
 def _job_narrative_briefing_daily():
     """Scheduled job: CXO narrative briefing packs per client → Mongo (LLM memo ingested, not user-triggered)."""
@@ -425,6 +477,10 @@ def start_scheduler():
     article_topics_min = sched_cfg.get("article_topics_interval_minutes", 60)
     reddit_trending_cfg = cfg.get("reddit_trending") or {}
     reddit_trending_min = reddit_trending_cfg.get("fetch_interval_minutes", 45)
+    narrative_strategy_engine_cfg = cfg.get("narrative_strategy_engine") or {}
+    narrative_strategy_reddit_min = (narrative_strategy_engine_cfg.get("reddit") or {}).get("ingest_interval_minutes", 180)
+    narrative_strategy_daily_hour = (narrative_strategy_engine_cfg.get("daily_full_run") or {}).get("hour", 18)
+    narrative_strategy_daily_minute = (narrative_strategy_engine_cfg.get("daily_full_run") or {}).get("minute", 30)
 
     _scheduler = BackgroundScheduler(daemon=True)
     _scheduler.add_job(_job_rss, "interval", hours=rss_hours, id="rss_ingestion")
@@ -439,6 +495,37 @@ def start_scheduler():
     _scheduler.add_job(_job_forum_ingestion, "interval", minutes=forum_min, id="forum_ingestion")
     if reddit_trending_cfg.get("enabled", False):
         _scheduler.add_job(_job_reddit_trending, "interval", minutes=reddit_trending_min, id="reddit_trending")
+
+    # Narrative Strategy Engine raw ingest (separate from reddit_trending and reddit_monitor).
+    if isinstance(narrative_strategy_engine_cfg, dict) and narrative_strategy_engine_cfg.get("enabled", True):
+        try:
+            _scheduler.add_job(
+                _job_narrative_strategy_reddit_ingest,
+                "interval",
+                minutes=max(30, int(narrative_strategy_reddit_min or 180)),
+                id="narrative_strategy_reddit_ingest",
+            )
+            # Run once shortly after start so narrative_strategy_reddit_raw is fresh without waiting hours.
+            _scheduler.add_job(
+                _job_narrative_strategy_reddit_ingest,
+                "date",
+                run_date=datetime.now(timezone.utc) + timedelta(seconds=75),
+                id="narrative_strategy_reddit_ingest_startup",
+            )
+        except Exception as e:
+            logger.warning("narrative_strategy_reddit_ingest job not scheduled", error=str(e))
+
+        # Daily full run (ingest + engine) - default 18:30 UTC? (scheduler uses server timezone)
+        try:
+            _scheduler.add_job(
+                _job_narrative_strategy_daily_full_run,
+                "cron",
+                hour=int(narrative_strategy_daily_hour),
+                minute=int(narrative_strategy_daily_minute),
+                id="narrative_strategy_daily_full_run",
+            )
+        except Exception as e:
+            logger.warning("narrative_strategy_daily_full_run job not scheduled", error=str(e))
 
     yo_cfg = cfg.get("youtube_official")
     if isinstance(yo_cfg, dict) and yo_cfg.get("enabled", False):
@@ -542,6 +629,7 @@ def start_scheduler():
         entity_mentions_sentiment_interval_minutes=sentiment_min,
         ai_summary_interval_hours=ai_summary_hours,
         article_topics_interval_minutes=article_topics_min,
+        narrative_strategy_reddit_ingest_interval_minutes=int(max(30, int(narrative_strategy_reddit_min or 180))),
     )
 
 

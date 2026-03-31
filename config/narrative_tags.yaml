@@ -1,0 +1,242 @@
+# ==========================================
+# NARRATIVE TAG DEFINITIONS (GLOBAL CONFIG)
+# ==========================================
+#
+# SINGLE SOURCE OF TRUTH for behavior_tag + domain_tags.
+# The code MUST NOT hardcode tag lists.
+#
+# Structure:
+# verticals:
+#   broker:
+#     behavior_tags: { <id>: {definition, include_when, exclude_when, examples} }
+#     domain_tags:   { <id>: {definition, include_when, exclude_when, examples, parents: [] } }
+#
+verticals:
+  broker:
+    behavior_tags:
+      validation_seeking:
+        definition: "Users seek external confirmation before making or holding decisions."
+        include_when:
+          - "asking for portfolio review"
+          - "seeking validation before trade/investment"
+          - "depending on others' opinions"
+        exclude_when:
+          - "confident strategy discussion"
+          - "sharing results without doubt"
+        examples:
+          - "Is my SIP allocation correct?"
+          - "Should I hold or exit this stock?"
+
+      panic_selling:
+        definition: "Users exit or consider exiting positions emotionally due to fear or losses."
+        include_when:
+          - "fear-driven exits"
+          - "reaction to sudden market drops"
+          - "emotional distress language"
+        exclude_when:
+          - "planned stop-loss execution"
+          - "systematic risk management"
+        examples:
+          - "Sold everything today, can't take it anymore"
+          - "Market crash, should I exit all?"
+
+      overtrading:
+        definition: "Users trade excessively without a clear or consistent strategy."
+        include_when:
+          - "frequent entry/exit"
+          - "switching strategies repeatedly"
+          - "chasing multiple trades"
+        exclude_when:
+          - "disciplined strategy execution"
+          - "low-frequency investing"
+        examples:
+          - "Took 10 trades today, still confused"
+          - "Trying different strategies every day"
+
+      confusion_allocation:
+        definition: "Users lack clarity on portfolio structure, diversification, or allocation."
+        include_when:
+          - "portfolio overlap confusion"
+          - "allocation doubts"
+          - "diversification questions"
+        exclude_when:
+          - "advanced portfolio optimization"
+          - "clear allocation frameworks"
+        examples:
+          - "Too many funds, is this over-diversified?"
+          - "How should I split equity vs debt?"
+
+      execution_anxiety:
+        definition: "Users fear or doubt trade execution quality (timing, fills, slippage)."
+        include_when:
+          - "slippage complaints"
+          - "delayed execution"
+          - "missed entry/exit due to system"
+        exclude_when:
+          - "market volatility discussions"
+        examples:
+          - "Order executed at worse price"
+          - "App lag caused loss"
+
+      cost_sensitivity:
+        definition: "Users are highly sensitive to fees, charges, or hidden costs."
+        include_when:
+          - "brokerage complaints"
+          - "hidden charges"
+          - "cost vs profit concerns"
+        exclude_when:
+          - "general PnL discussion"
+        examples:
+          - "Charges are eating my profits"
+          - "Didn’t expect these fees"
+
+      trust_breakdown:
+        definition: "Users lose confidence in platform reliability, fairness, or safety."
+        include_when:
+          - "fraud concerns"
+          - "platform distrust"
+          - "manipulation accusations"
+        exclude_when:
+          - "minor UX complaints"
+        examples:
+          - "This platform is not reliable"
+          - "Feels manipulated"
+
+      hesitation_entry:
+        definition: "Users delay entering trades due to uncertainty or fear."
+        include_when:
+          - "missed opportunities"
+          - "waiting too long"
+          - "indecision before entry"
+        exclude_when:
+          - "planned long-term holding"
+        examples:
+          - "Stock ran up, I hesitated"
+          - "Still waiting for entry"
+
+      fomo_behavior:
+        definition: "Users chase trades or trends due to fear of missing out."
+        include_when:
+          - "late entry after rally"
+          - "copying others"
+          - "hype-driven buying"
+        exclude_when:
+          - "researched entry decisions"
+        examples:
+          - "Entered after it already ran"
+          - "Everyone buying, so I bought"
+
+      unclassified_behavior:
+        definition: "Narrative does not clearly map to a defined behavioral pattern."
+        include_when:
+          - "early-stage unclear patterns"
+        exclude_when:
+          - "clear behavioral signals"
+        examples:
+          - "General market discussion without clear action"
+
+    domain_tags:
+      platform_reliability:
+        definition: "System uptime, stability, and crash behavior."
+        parents: []
+        include_when: ["app crashes", "downtime", "login failures", "order failures due to system"]
+        exclude_when: ["pure market volatility discussion"]
+        examples: ["App crashed during trade"]
+
+      app_latency_performance:
+        definition: "Performance lag or slowness in app or interface."
+        parents: [platform_reliability]
+        include_when: ["slow UI", "lagging charts", "freezing screens"]
+        exclude_when: ["external ISP outage discussions"]
+        examples: ["App lagging heavily"]
+
+      order_execution_speed:
+        definition: "Speed and responsiveness of trade execution."
+        parents: [platform_reliability]
+        include_when: ["delayed orders", "execution lag"]
+        exclude_when: ["normal fills in fast markets"]
+        examples: ["Order took too long to execute"]
+
+      execution_slippage:
+        definition: "Mismatch between expected and actual execution price."
+        parents: [order_execution_speed]
+        include_when: ["slippage complaints", "bad fill price"]
+        exclude_when: ["general market movement explanations without execution complaint"]
+        examples: ["Order executed worse than expected"]
+
+      margin_collateral:
+        definition: "Margin requirements, collateral usage, and leverage."
+        parents: []
+        include_when: ["margin issues", "collateral requirements", "pledge/unpledge confusion"]
+        exclude_when: ["cash-only investing"]
+        examples: ["Margin blocked unexpectedly"]
+
+      pricing_fees:
+        definition: "Brokerage charges and pricing structure."
+        parents: []
+        include_when: ["fee complaints", "brokerage comparisons"]
+        exclude_when: ["pure PnL discussion"]
+        examples: ["Brokerage too high"]
+
+      hidden_charges:
+        definition: "Unexpected or unclear costs."
+        parents: [pricing_fees]
+        include_when: ["unexpected charges", "DP/AMC surprise"]
+        exclude_when: ["transparent pricing breakdown"]
+        examples: ["Hidden charges applied"]
+
+      brokerage_transparency:
+        definition: "Clarity of pricing and fee disclosure."
+        parents: [pricing_fees]
+        include_when: ["confusing pricing", "unclear breakdown"]
+        exclude_when: ["clear fee disclosure"]
+        examples: ["Charges not clearly shown"]
+
+      withdrawals_settlement:
+        definition: "Withdrawal process and settlement delays."
+        parents: []
+        include_when: ["withdrawal delays", "settlement not credited"]
+        exclude_when: ["instant settlement products"]
+        examples: ["Money not credited"]
+
+      tax_reporting:
+        definition: "Tax reports, statements, and compliance outputs."
+        parents: []
+        include_when: ["tax report confusion", "P&L statement mismatch"]
+        exclude_when: ["general profit discussion"]
+        examples: ["Tax report unclear"]
+
+      onboarding_kyc:
+        definition: "Account opening and KYC process."
+        parents: []
+        include_when: ["KYC delay", "verification failures", "account freeze during onboarding"]
+        exclude_when: ["issues after active trading"]
+        examples: ["KYC taking too long"]
+
+      trust_safety_fraud:
+        definition: "Fraud concerns and account safety issues."
+        parents: []
+        include_when: ["account hacked", "fraud/scam concerns", "security distrust"]
+        exclude_when: ["minor UX complaints"]
+        examples: ["Account hacked"]
+
+      support_resolution:
+        definition: "Customer support experience."
+        parents: []
+        include_when: ["support not responding", "ticket unresolved"]
+        exclude_when: ["self-service success"]
+        examples: ["Support not responding"]
+
+      mf_wealth:
+        definition: "Mutual fund and wealth investing features."
+        parents: []
+        include_when: ["SIP", "mutual fund portfolio", "direct plan questions"]
+        exclude_when: ["intraday only"]
+        examples: ["SIP portfolio review"]
+
+      ipo_primary:
+        definition: "IPO investment and primary market access."
+        parents: []
+        include_when: ["IPO allotment", "UPI mandate", "application failures"]
+        exclude_when: ["secondary market"]
+        examples: ["Didn’t get IPO allotment"]

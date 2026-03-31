@@ -28,6 +28,10 @@ async def lifespan(app: FastAPI):
             logger.warning("OPENROUTER_API_KEY is missing or too short - chat will fail. Set it in .env and restart.")
         from app.services.mongodb import get_mongo_client
         await get_mongo_client()
+        # Fail fast: narrative tags taxonomy must be valid before serving requests.
+        from app.core.narrative_tags_config import validate_narrative_tags_config_or_raise
+
+        validate_narrative_tags_config_or_raise()
         from app.core.social_posts_indexes import ensure_social_posts_indexes
         from app.core.ingestion_indexes import ensure_ingestion_indexes
         await ensure_social_posts_indexes()

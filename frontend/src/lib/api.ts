@@ -52,13 +52,28 @@ export type NarrativeApiItem = {
   narrative: string;
   belief: string;
   why_now: string;
+  /** One sentence: consequence or risk */
+  why_it_matters?: string;
+  /** Broker business consequence (revenue, churn, trust) */
+  business_impact?: string;
+  /** Top-line line to say (usable immediately; often mirrors founder intent) */
+  what_to_say?: string;
+  /** cluster | fallback_generated | stored | ui_fallback */
+  source?: string;
   confidence_score: number;
   signal_strength: "strong" | "emerging";
+  signal_reason?: string;
   vertical: string;
-  categories: string[];
+  /** Mandatory behavior tag; UI maps unclassified_behavior -> Emerging Pattern */
+  behavior_tag: string;
+  /** 0-2 domain tags used for heatmap */
+  domain_tags: string[];
   relevance: string;
   relevance_reason: string;
   market_signal?: string;
+  opportunity_line?: string;
+  closest_competitor?: { name?: string; reason?: string };
+  distribution_strategy?: string[];
   companies: Record<string, { gap?: string; strategy?: string }>;
   founder_mode: { what_to_say: string; channels: string[]; example_post: string };
   pr_mode: {
@@ -67,15 +82,67 @@ export type NarrativeApiItem = {
     content_examples: { news_article?: string; social_post?: string; forum_response?: string };
   };
   evidence?: { url: string; title?: string; snippet?: string; subreddit?: string }[];
-  debug: { cluster_size: number; sample_posts: string[] };
+  debug: { cluster_size: number; sample_posts: string[]; fallback_low_signal?: boolean };
 };
 
-export async function fetchNarratives(client: string, opts?: { limit?: number }): Promise<NarrativeApiItem[]> {
+export type NarrativesDashboardMeta = {
+  fallback_triggered?: boolean;
+  fallback_mode?: boolean;
+  clusters_rejected?: number;
+  reason_summary?: string[];
+};
+
+export type NarrativesDashboardResponse = {
+  narratives: NarrativeApiItem[];
+  meta: NarrativesDashboardMeta;
+};
+
+export type NarrativeDrilldownItem = {
+  title: string;
+  narrative: string;
+  belief: string;
+  why_now: string;
+  signal_strength: "strong" | "emerging" | string;
+  signal_reason?: string;
+  confidence_score: number;
+  companies: Record<string, { gap?: string; strategy?: string }>;
+  what_to_say?: string;
+  opportunity_line?: string;
+  closest_competitor?: { name?: string; reason?: string };
+  distribution_strategy?: string[];
+};
+
+export async function fetchNarratives(
+  client: string,
+  opts?: { limit?: number }
+): Promise<NarrativesDashboardResponse> {
   const params = new URLSearchParams();
   params.set("limit", String(opts?.limit ?? 7));
   const url = withClientQuery(`${getApiBase()}/narratives?${params.toString()}`, client);
   const res = await fetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = await res.json();
-  return (Array.isArray(data) ? data : []) as NarrativeApiItem[];
+  if (Array.isArray(data)) {
+    return { narratives: data as NarrativeApiItem[], meta: {} };
+  }
+  const raw = data as { narratives?: NarrativeApiItem[]; meta?: NarrativesDashboardMeta };
+  return {
+    narratives: Array.isArray(raw.narratives) ? raw.narratives : [],
+    meta: raw.meta && typeof raw.meta === "object" ? raw.meta : {},
+  };
+}
+
+export async function fetchNarrativesByCategory(
+  client: string,
+  opts: { category: string; company: string; limit?: number }
+): Promise<NarrativeDrilldownItem[]> {
+  const params = new URLSearchParams();
+  params.set("category", String(opts.category || ""));
+  params.set("company", String(opts.company || ""));
+  params.set("limit", String(opts.limit ?? 80));
+  const url = withClientQuery(`${getApiBase()}/narratives/by-category?${params.toString()}`, client);
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  return Array.isArray(data) ? (data as NarrativeDrilldownItem[]) : [];
 }

@@ -25,8 +25,12 @@ export type ClientFeatures = {
 
 export type ClientRow = {
   name: string;
+  slug: string;
   domain: string;
+  /** Competitor display names (backward compatible). */
   competitors: string[];
+  /** Canonical competitor slugs for comparisons/keys. */
+  competitor_slugs: string[];
   vertical: string;
   features: ClientFeatures;
   report_timezone?: string;
@@ -37,8 +41,12 @@ export type PendingClientUrl = { target: string; fromUrl: string };
 
 export type ActiveClientContextValue = {
   clients: ClientRow[];
+  clientSlug: string | null;
+  setClientSlug: (slug: string) => void;
+  /** Backward-compat alias: accepts slug. */
+  setClientName: (slug: string) => void;
+  /** Display name of active client (non-canonical). */
   clientName: string | null;
-  setClientName: (name: string) => void;
   activeClient: ClientRow | null;
   ready: boolean;
   pendingClientUrlRef: MutableRefObject<PendingClientUrl | null>;
@@ -48,12 +56,19 @@ const ClientContext = createContext<ActiveClientContextValue | null>(null);
 
 function normalizeClient(raw: Record<string, unknown>): ClientRow | null {
   const name = String(raw.name ?? "").trim();
-  if (!name) return null;
+  const slug = String(raw.slug ?? "").trim().toLowerCase();
+  if (!name || !slug) return null;
   const f = (raw.features ?? {}) as Record<string, unknown>;
   return {
     name,
+    slug,
     domain: String(raw.domain ?? "").trim(),
-    competitors: Array.isArray(raw.competitors) ? raw.competitors.map(String) : [],
+    competitors: Array.isArray(raw.competitors)
+      ? raw.competitors.map((c) => String((c as any)?.name ?? "").trim()).filter(Boolean)
+      : [],
+    competitor_slugs: Array.isArray(raw.competitors)
+      ? raw.competitors.map((c) => String((c as any)?.slug ?? "").trim().toLowerCase()).filter(Boolean)
+      : [],
     vertical: String(raw.vertical ?? "corporate_pr"),
     features: {
       forums: f.forums !== false,
@@ -68,7 +83,7 @@ function normalizeClient(raw: Record<string, unknown>): ClientRow | null {
 
 export function ClientProvider({ children }: { children: ReactNode }) {
   const [clients, setClients] = useState<ClientRow[]>([]);
-  const [clientName, setClientNameState] = useState<string | null>(null);
+  const [clientSlug, setClientSlugState] = useState<string | null>(null);
   const pendingClientUrlRef = useRef<PendingClientUrl | null>(null);
   const router = useRouter();
   const pathname = usePathname() || "/";
@@ -94,13 +109,13 @@ export function ClientProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (!clients.length || clientName !== null) return;
+    if (!clients.length || clientSlug !== null) return;
     let pick: string;
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
-      const urlC = params.get("client")?.trim();
+      const urlC = params.get("client")?.trim().toLowerCase();
       const urlV = params.get("vertical")?.trim().toLowerCase();
-      if (urlC && clients.some((c) => c.name === urlC)) {
+      if (urlC && clients.some((c) => c.slug === urlC)) {
         pick = urlC;
       } else if (!urlC && (urlV === "political" || urlV === "trading")) {
         const row = firstClientForVertical(
@@ -108,37 +123,37 @@ export function ClientProvider({ children }: { children: ReactNode }) {
           urlV === "political" ? "political" : "trading"
         );
         if (row) {
-          pick = row.name;
+          pick = row.slug;
         } else {
           const stored = localStorage.getItem(ZYON_CLIENT_STORAGE_KEY)?.trim();
           pick =
-            stored && clients.some((c) => c.name === stored) ? stored : clients[0].name;
+            stored && clients.some((c) => c.slug === stored) ? stored : clients[0].slug;
         }
       } else {
         const stored = localStorage.getItem(ZYON_CLIENT_STORAGE_KEY)?.trim();
         pick =
-          stored && clients.some((c) => c.name === stored) ? stored : clients[0].name;
+          stored && clients.some((c) => c.slug === stored) ? stored : clients[0].slug;
       }
       localStorage.setItem(ZYON_CLIENT_STORAGE_KEY, pick);
     } else {
-      pick = clients[0].name;
+      pick = clients[0].slug;
     }
-    setClientNameState(pick);
-  }, [clients, clientName]);
+    setClientSlugState(pick);
+  }, [clients, clientSlug]);
 
-  const setClientName = useCallback(
-    (name: string) => {
-      const trimmed = name.trim();
-      const row = clients.find((c) => c.name === trimmed);
+  const setClientSlug = useCallback(
+    (slug: string) => {
+      const trimmed = slug.trim().toLowerCase();
+      const row = clients.find((c) => c.slug === trimmed);
       if (!trimmed || !row) return;
       if (typeof window !== "undefined") {
         const fromUrl =
-          new URLSearchParams(window.location.search).get("client")?.trim() ?? "";
+          new URLSearchParams(window.location.search).get("client")?.trim().toLowerCase() ?? "";
         pendingClientUrlRef.current = { target: trimmed, fromUrl };
       } else {
         pendingClientUrlRef.current = { target: trimmed, fromUrl: "" };
       }
-      setClientNameState(trimmed);
+      setClientSlugState(trimmed);
       if (typeof window !== "undefined") {
         localStorage.setItem(ZYON_CLIENT_STORAGE_KEY, trimmed);
         const params = new URLSearchParams(window.location.search);
@@ -152,26 +167,28 @@ export function ClientProvider({ children }: { children: ReactNode }) {
   );
 
   const activeClient = useMemo(
-    () => clients.find((c) => c.name === clientName) ?? null,
-    [clients, clientName]
+    () => clients.find((c) => c.slug === clientSlug) ?? null,
+    [clients, clientSlug]
   );
 
   if (typeof window !== "undefined") {
     activeClientVerticalBundleRef.current = activeClient ? verticalFromClient(activeClient) : null;
   }
 
-  const ready = clients.length > 0 && clientName !== null;
+  const ready = clients.length > 0 && clientSlug !== null;
 
   const value = useMemo<ActiveClientContextValue>(
     () => ({
       clients,
-      clientName,
-      setClientName,
+      clientSlug,
+      setClientSlug,
+      setClientName: setClientSlug,
+      clientName: activeClient?.name ?? null,
       activeClient,
       ready,
       pendingClientUrlRef,
     }),
-    [clients, clientName, setClientName, activeClient, ready]
+    [clients, clientSlug, setClientSlug, activeClient, ready]
   );
 
   return <ClientContext.Provider value={value}>{children}</ClientContext.Provider>;

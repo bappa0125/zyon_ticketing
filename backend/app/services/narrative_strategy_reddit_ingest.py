@@ -202,12 +202,32 @@ async def ingest_reddit_raw() -> dict[str, Any]:
 
     fetch_comments = bool(r_cfg.get("fetch_top_comments", True))
     top_comments_per_post = min(int(r_cfg.get("top_comments_per_post") or 8), 20)
+    # Comment threads are expensive (1 HTTP call per post). Cap requests hard so scheduled runs finish.
+    max_comment_fetch_requests = int(r_cfg.get("max_comment_fetch_requests_per_run") or 60)
+    max_comment_fetch_posts_per_subreddit = int(r_cfg.get("max_comment_fetch_posts_per_subreddit") or 6)
     max_posts_total = int(r_cfg.get("max_posts_total_per_run") or 500)
     max_comments_total = int(r_cfg.get("max_comments_total_per_run") or 2500)
 
     headers = {"User-Agent": _user_agent()}
     now = datetime.now(timezone.utc)
     stats = IngestStats()
+    error_samples: list[dict[str, Any]] = []
+
+    # Option B: adaptive comment fetching under rate limits.
+    # - Try direct reddit.com comments first.
+    # - If we hit 429/403, use ScrapingAnt for a SMALL capped number of comment calls, then stop comment fetching
+    #   for the rest of the run to protect budget and runtime.
+    sa_cfg = (r_cfg.get("scrapingant") or {}) if isinstance(r_cfg.get("scrapingant"), dict) else {}
+    sa_enabled = bool(sa_cfg.get("enabled", False))
+    sa_daily_cap = int(sa_cfg.get("daily_cap_calls") or 50)
+    sa_fallback_statuses = sa_cfg.get("fallback_statuses") or [429, 403]
+    sa_fallback_statuses = [
+        int(x) for x in sa_fallback_statuses if isinstance(x, (int, float, str)) and str(x).isdigit()
+    ]
+    # New knob (defaults conservative): max comment threads to fetch via ScrapingAnt per run after rate-limit detected.
+    sa_comment_fallbacks_max = int(sa_cfg.get("max_comment_fallbacks_per_run") or 12)
+    sa_comment_fallbacks_used = 0
+    comments_rate_limited = False
 
     from app.services.mongodb import get_mongo_client, get_db
 
@@ -231,10 +251,21 @@ async def ingest_reddit_raw() -> dict[str, Any]:
                 stats.skipped += 1
         except Exception as e:
             stats.errors += 1
-            logger.debug("narrative_strategy_reddit_upsert_failed", error=str(e))
+            # Warnings for first few failures so ops can see root cause (debug logs are often suppressed).
+            if len(error_samples) < 6:
+                sample = {
+                    "stage": "upsert",
+                    "error_type": type(e).__name__,
+                    "error": str(e)[:400],
+                    "subreddit": str(key.get("subreddit") or ""),
+                    "reddit_id": str(key.get("reddit_id") or ""),
+                }
+                error_samples.append(sample)
+                logger.warning("narrative_strategy_reddit_upsert_failed", **sample)
 
     posts_seen = 0
     comments_seen = 0
+    comment_fetch_requests = 0
 
     for sub in subreddits:
         if posts_seen >= max_posts_total:
@@ -253,7 +284,13 @@ async def ingest_reddit_raw() -> dict[str, Any]:
 
         children = (data.get("data") or {}).get("children") or []
         raw_posts = [c.get("data") for c in children if isinstance(c, dict) and isinstance(c.get("data"), dict)]
+        # For comment fetching, prioritize higher-signal posts first.
+        try:
+            raw_posts.sort(key=lambda rp: int((rp or {}).get("score") or 0), reverse=True)
+        except Exception:
+            pass
 
+        comment_posts_used = 0
         for raw in raw_posts:
             if posts_seen >= max_posts_total:
                 break
@@ -265,7 +302,14 @@ async def ingest_reddit_raw() -> dict[str, Any]:
 
             # attach top comments
             permalink = (raw.get("permalink") or "").strip()
-            if fetch_comments and permalink and comments_seen < max_comments_total:
+            if (
+                fetch_comments
+                and permalink
+                and comments_seen < max_comments_total
+                and comment_fetch_requests < max_comment_fetch_requests
+                and comment_posts_used < max_comment_fetch_posts_per_subreddit
+                and not comments_rate_limited  # once limited, we switch to controlled ScrapingAnt-only block below
+            ):
                 c_url = _comments_url(permalink, limit=top_comments_per_post)
                 if c_url:
                     try:
@@ -280,9 +324,106 @@ async def ingest_reddit_raw() -> dict[str, Any]:
                         post["top_comments"] = comments_flat
                         comments_seen += len(comments_flat)
                         stats.comments_fetched += len(comments_flat)
+                        comment_fetch_requests += 1
+                        comment_posts_used += 1
+                    except httpx.HTTPStatusError as e:
+                        stats.errors += 1
+                        status = int(getattr(getattr(e, "response", None), "status_code", 0) or 0)
+                        # If throttled/blocked, flip into rate-limited mode and attempt a capped ScrapingAnt rescue.
+                        if status and status in sa_fallback_statuses:
+                            comments_rate_limited = True
+                            if sa_enabled and sa_comment_fallbacks_used < sa_comment_fallbacks_max:
+                                try:
+                                    from app.services.scrapingant_service import fetch_json_via_scrapingant
+
+                                    cjson2 = await fetch_json_via_scrapingant(c_url, daily_cap=sa_daily_cap)
+                                    comments_flat2: list[dict[str, Any]] = []
+                                    if isinstance(cjson2, list) and len(cjson2) >= 2:
+                                        _flatten_comments(cjson2[1], comments_flat2, top_comments_per_post)
+                                    comments_flat2.sort(key=lambda x: int(x.get("score") or 0), reverse=True)
+                                    comments_flat2 = comments_flat2[:top_comments_per_post]
+                                    post["top_comments"] = comments_flat2
+                                    comments_seen += len(comments_flat2)
+                                    stats.comments_fetched += len(comments_flat2)
+                                    comment_fetch_requests += 1
+                                    comment_posts_used += 1
+                                    sa_comment_fallbacks_used += 1
+                                except Exception as e2:
+                                    if len(error_samples) < 6:
+                                        sample = {
+                                            "stage": "comments",
+                                            "error_type": type(e2).__name__,
+                                            "error": str(e2)[:400],
+                                            "subreddit": sub,
+                                        }
+                                        error_samples.append(sample)
+                                        logger.warning("narrative_strategy_reddit_comments_failed", **sample)
+                            # Either way, we do not continue normal comment fetching after this point in run.
+                            # Remaining comment threads will be handled in the controlled block below (if budget allows).
+                        else:
+                            if len(error_samples) < 6:
+                                sample = {
+                                    "stage": "comments",
+                                    "error_type": type(e).__name__,
+                                    "error": str(e)[:400],
+                                    "subreddit": sub,
+                                }
+                                error_samples.append(sample)
+                                logger.warning("narrative_strategy_reddit_comments_failed", **sample)
                     except Exception as e:
                         stats.errors += 1
-                        logger.debug("narrative_strategy_reddit_comments_failed", subreddit=sub, error=str(e))
+                        if len(error_samples) < 6:
+                            sample = {
+                                "stage": "comments",
+                                "error_type": type(e).__name__,
+                                "error": str(e)[:400],
+                                "subreddit": sub,
+                            }
+                            error_samples.append(sample)
+                            logger.warning("narrative_strategy_reddit_comments_failed", **sample)
+
+            # Controlled comment rescue mode (Option B):
+            # After we detect rate limits once, only fetch comments via ScrapingAnt for a limited number
+            # of posts per run (then stop).
+            if (
+                fetch_comments
+                and permalink
+                and comments_rate_limited
+                and sa_enabled
+                and sa_comment_fallbacks_used < sa_comment_fallbacks_max
+                and comments_seen < max_comments_total
+                and comment_fetch_requests < max_comment_fetch_requests
+                and comment_posts_used < max_comment_fetch_posts_per_subreddit
+                and not post.get("top_comments")
+            ):
+                c_url = _comments_url(permalink, limit=top_comments_per_post)
+                if c_url:
+                    try:
+                        from app.services.scrapingant_service import fetch_json_via_scrapingant
+
+                        cjson3 = await fetch_json_via_scrapingant(c_url, daily_cap=sa_daily_cap)
+                        comments_flat3: list[dict[str, Any]] = []
+                        if isinstance(cjson3, list) and len(cjson3) >= 2:
+                            _flatten_comments(cjson3[1], comments_flat3, top_comments_per_post)
+                        comments_flat3.sort(key=lambda x: int(x.get("score") or 0), reverse=True)
+                        comments_flat3 = comments_flat3[:top_comments_per_post]
+                        post["top_comments"] = comments_flat3
+                        comments_seen += len(comments_flat3)
+                        stats.comments_fetched += len(comments_flat3)
+                        comment_fetch_requests += 1
+                        comment_posts_used += 1
+                        sa_comment_fallbacks_used += 1
+                    except Exception as e:
+                        stats.errors += 1
+                        if len(error_samples) < 6:
+                            sample = {
+                                "stage": "comments",
+                                "error_type": type(e).__name__,
+                                "error": str(e)[:400],
+                                "subreddit": sub,
+                            }
+                            error_samples.append(sample)
+                            logger.warning("narrative_strategy_reddit_comments_failed", **sample)
 
             key = {"pipeline": "narrative_strategy_reddit", "platform": "reddit", "kind": "post", "reddit_id": post.get("reddit_id", ""), "subreddit": sub}
             await _upsert(post, key)
@@ -298,5 +439,9 @@ async def ingest_reddit_raw() -> dict[str, Any]:
         "updated": stats.updated,
         "skipped": stats.skipped,
         "errors": stats.errors,
+        "error_samples": error_samples[:6],
+        "comments_rate_limited": bool(comments_rate_limited),
+        "scrapingant_comment_fallbacks_used": int(sa_comment_fallbacks_used),
+        "scrapingant_comment_fallbacks_max": int(sa_comment_fallbacks_max),
     }
 

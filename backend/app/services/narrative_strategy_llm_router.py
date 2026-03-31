@@ -23,6 +23,130 @@ def _sha(s: str) -> str:
     return hashlib.sha256((s or "").encode("utf-8")).hexdigest()
 
 
+# Titles that look like keyword stacks / SEO / thread labels (reject or regenerate)
+_TITLE_JUNK_RE = re.compile(
+    r"\b(seek|seeking|identify|identifying|discuss|discussion|discussing|various|frequently|"
+    r"empowering|topics?|portfolios?)\b",
+    re.I,
+)
+
+
+_ABSTRACT_TITLE_RE = re.compile(
+    r"\b(rewards?|celebrates?|embraces?|journey|path to|power of|wisdom|"
+    r"conviction|faith|hope|matters most|beats|wins|triumph|glory)\b",
+    re.I,
+)
+
+
+def is_abstract_title(title: str) -> bool:
+    """Motivational / slogan titles without concrete behavior (e.g. 'Volatility Rewards Conviction')."""
+    t = (title or "").strip()
+    if len(t) < 8:
+        return False
+    if _ABSTRACT_TITLE_RE.search(t):
+        return True
+    # Verb pattern: abstract X for Y (no actor mistake)
+    if re.search(r"\b(volatility|markets?|uncertainty)\s+\w+\s+(rewards?|punishes?|favors?)\b", t, re.I):
+        return True
+    return False
+
+
+def is_low_quality_title(title: str) -> bool:
+    """True if title should be dropped or rewritten (robotic / keyword-like). Max 6 words."""
+    t = (title or "").strip()
+    if len(t) < 6:
+        return True
+    words = re.sub(r"[/]", " ", t).split()
+    wc = len([w for w in words if w.strip()])
+    if wc < 3 or wc > 6:
+        return True
+    if _TITLE_JUNK_RE.search(t):
+        return True
+    tl = t.lower()
+    if any(
+        x in tl
+        for x in (
+            "discussion around",
+            "discussion about",
+            "users are",
+            "people are",
+            "informed decisions",
+            "helping users",
+        )
+    ):
+        return True
+    # keyword stacking: mostly 1–2 char syllables without clear phrase
+    short = sum(1 for w in words if len(re.sub(r"[^a-z0-9]", "", w.lower())) <= 2)
+    if wc >= 5 and short / max(wc, 1) >= 0.55:
+        return True
+    return False
+
+
+_GENERIC_LANGUAGE_RE = re.compile(
+    r"\b(users are|people are|discussion about|discussions about|various topics?|empowering users|helping users)\b",
+    re.I,
+)
+
+_WHY_IT_MATTERS_FLUFF_RE = re.compile(
+    r"\b(important|critical(?:ly)?|critical for|helps?\s|helpful|it is important|essential to\b|valuable to\b|"
+    r"clear insights|insights are)\b",
+    re.I,
+)
+
+_BUSINESS_IMPACT_VAGUE_RE = re.compile(
+    r"\b(impact|important|critical(?:ly)?|helps?\b|helpful|valuable|essential|insights?)\b",
+    re.I,
+)
+
+_BUSINESS_METRIC_RE = re.compile(
+    r"\b(churn|retention|retain|lifetime value|ltv|revenue|commissions?|aum|wallet share|"
+    r"activation|conversion|arpu|cac|support load|ticket volume|sip cancellations?|cancellations?)\b",
+    re.I,
+)
+
+_WHAT_TO_SAY_WEAK_RE = re.compile(
+    r"^(need |want |get |try |contact |discover |learn more|find out|don't hesitate|feel free|please |"
+    r"we invite|reach out)\b",
+    re.I,
+)
+
+
+def contains_generic_language(text: str) -> bool:
+    """Banned filler — triggers LLM rewrite."""
+    s = (text or "").strip().lower()
+    if not s:
+        return False
+    if re.search(r"\bvarious\b", s):
+        return True
+    return bool(_GENERIC_LANGUAGE_RE.search(s))
+
+
+def is_low_quality_why_it_matters(text: str) -> bool:
+    """Fluff advisory tone — rewrite or drop."""
+    t = (text or "").strip()
+    if len(t) < 28:
+        return True
+    if _WHY_IT_MATTERS_FLUFF_RE.search(t):
+        return True
+    if contains_generic_language(t):
+        return True
+    return False
+
+
+def is_low_quality_what_to_say(text: str) -> bool:
+    """Questions, polite CTAs, marketing — rewrite or drop."""
+    t = (text or "").strip()
+    if not t or len(t) < 14:
+        return True
+    if "?" in t:
+        return True
+    if _WHAT_TO_SAY_WEAK_RE.search(t):
+        return True
+    if contains_generic_language(t):
+        return True
+    return False
+
+
 def _is_generic(text: str) -> bool:
     s = (text or "").strip().lower()
     if not s:
@@ -244,6 +368,170 @@ def _looks_like_json(s: str) -> bool:
     return (t.startswith("{") and t.endswith("}")) or (t.startswith("[") and t.endswith("]"))
 
 
+_OPPORTUNITY_GENERIC_RE = re.compile(
+    r"\b(first mover advantage|open narrative|strategically open|white\s*space|no one owns|whoever owns this|"
+    r"own this narrative|become the voice of|differentiation|differentiate|strategic(?:ally)?|advantage)\b",
+    re.I,
+)
+
+
+async def generate_opportunity_line(*, narrative: str, companies: list[str]) -> str:
+    """
+    1 sharp sentence explaining WHY a narrative is open (white space) in a narrative-specific way.
+    Must avoid generic consulting phrases like "first mover advantage".
+    Returns empty string on failure or if output is generic.
+    """
+    llm_cfg = _cfg_llm()
+    draft_model = (llm_cfg.get("draft_model") or "deepseek/deepseek-chat").strip()
+    payload = {"narrative": (narrative or "")[:900], "companies": [str(c) for c in (companies or []) if isinstance(c, str)][:20]}
+
+    system = (
+        "You are writing a positioning opportunity insight line for a Narrative Decision Engine.\n"
+        "Task: explain why this narrative is strategically open in EXACTLY 1 sharp sentence.\n"
+        "Hard rules:\n"
+        "- DO NOT use generic phrases like: first mover advantage, open narrative, strategically open, white space, nobody owns, differentiate.\n"
+        "- Be specific to the user behavior + market messaging gap.\n"
+        "- No company names.\n"
+        "- No product/UX/feature suggestions.\n"
+        "Return ONLY JSON: {\"opportunity_line\":\"...\"}\n"
+    )
+    user = json.dumps(payload, ensure_ascii=False)
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    try:
+        obj = await _cached_json_call(
+            namespace="opportunity_line:v1",
+            payload=payload,
+            value_key="obj",
+            draft_model=draft_model,
+            messages=messages,
+        )
+    except Exception:
+        return ""
+    if not isinstance(obj, dict):
+        return ""
+    line = str(obj.get("opportunity_line") or "").strip()
+    # Basic hygiene: single sentence, non-generic.
+    if not line or len(line) < 35:
+        return ""
+    if line.count("?") > 0:
+        return ""
+    if _OPPORTUNITY_GENERIC_RE.search(line):
+        return ""
+    if contains_generic_language(line):
+        return ""
+    # Trim to one sentence max if model over-produces.
+    m = re.search(r"[.!?](\s|$)", line)
+    if m and m.end() >= 20:
+        line = line[: m.end()].strip()
+    return line
+
+
+async def closest_competitor_llm(*, narrative: str, competitors: list[str]) -> dict[str, str]:
+    """
+    Pick the competitor closest to owning the narrative (when heuristics are unclear).
+    Returns: {"name": "...", "reason": "..."} or empty strings on failure.
+    """
+    llm_cfg = _cfg_llm()
+    draft_model = (llm_cfg.get("draft_model") or "deepseek/deepseek-chat").strip()
+    comps = [str(c).strip() for c in (competitors or []) if isinstance(c, str) and str(c).strip()]
+    payload = {"narrative": (narrative or "")[:900], "competitors": comps[:20]}
+    if not payload["narrative"] or len(comps) < 2:
+        return {"name": "", "reason": ""}
+
+    system = (
+        "You are a competitive narrative analyst.\n"
+        "Task: choose which competitor is closest to owning this narrative and why.\n"
+        "Rules:\n"
+        "- Output exactly 1 competitor from the provided list.\n"
+        "- Reason must be 1 line, concrete (what they already signal), and must mention the gap (what they miss).\n"
+        "- No generic phrases like: first mover advantage, white space, open narrative, strategically open.\n"
+        "- No product/feature suggestions.\n"
+        "Return ONLY JSON: {\"name\":\"<competitor>\",\"reason\":\"<one line>\"}\n"
+    )
+    user = json.dumps(payload, ensure_ascii=False)
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    try:
+        obj = await _cached_json_call(
+            namespace="closest_competitor:v1",
+            payload=payload,
+            value_key="obj",
+            draft_model=draft_model,
+            messages=messages,
+        )
+    except Exception:
+        return {"name": "", "reason": ""}
+    if not isinstance(obj, dict):
+        return {"name": "", "reason": ""}
+    name = str(obj.get("name") or "").strip()
+    reason = str(obj.get("reason") or "").strip()
+    if not name or name not in comps:
+        return {"name": "", "reason": ""}
+    if not reason or len(reason) < 18:
+        return {"name": name, "reason": ""}
+    if _OPPORTUNITY_GENERIC_RE.search(reason) or contains_generic_language(reason):
+        return {"name": name, "reason": ""}
+    # keep reason to one sentence
+    m = re.search(r"[.!?](\s|$)", reason)
+    if m and m.end() >= 20:
+        reason = reason[: m.end()].strip()
+    return {"name": name, "reason": reason}
+
+
+async def generate_distribution_strategy(*, narrative: str) -> list[str]:
+    """
+    Returns up to 3 concrete distribution bullets (platform + format).
+    Output must be a JSON array of strings.
+    """
+    llm_cfg = _cfg_llm()
+    draft_model = (llm_cfg.get("draft_model") or "deepseek/deepseek-chat").strip()
+    payload = {"narrative": (narrative or "")[:900]}
+    if not payload["narrative"].strip():
+        return []
+
+    system = (
+        "You are a comms operator.\n"
+        "Task: Where should this narrative be pushed? Return 3 bullets max.\n"
+        "Rules:\n"
+        "- Output ONLY valid JSON array of strings.\n"
+        "- Max 3 bullets.\n"
+        "- Each bullet must include a platform and a format (e.g., Twitter thread, LinkedIn founder post, PR/earned media article, community AMA).\n"
+        "- No generic bullets like \"social media\" or \"content marketing\".\n"
+        "- No company names. No speculation. No fake data.\n"
+    )
+    user = json.dumps(payload, ensure_ascii=False)
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    try:
+        rows = await _cached_json_call(
+            namespace="distribution_strategy:v1",
+            payload=payload,
+            value_key="rows",
+            draft_model=draft_model,
+            messages=messages,
+        )
+    except Exception:
+        return []
+    if not isinstance(rows, list):
+        return []
+
+    out: list[str] = []
+    for x in rows:
+        s = str(x or "").strip()
+        if not s:
+            continue
+        if contains_generic_language(s):
+            continue
+        if re.search(r"\b(social media|content marketing|blog post|post on social|go viral)\b", s, re.I):
+            continue
+        # must mention at least one known platform-ish term
+        if not re.search(r"\b(twitter|x\b|linkedin|pr\b|earned media|community|reddit|newsletter|webinar|podcast)\b", s, re.I):
+            continue
+        out.append(s)
+        if len(out) >= 3:
+            break
+    # dedup keep order
+    return _dedup_keep_order(out)[:3]
+
+
 async def _cached_json_call(*, namespace: str, payload: dict[str, Any], value_key: str, draft_model: str, messages: list[dict[str, str]]) -> Any:
     """
     Generic cached JSON call. Stores Mongo doc in narrative_strategy_llm_cache:
@@ -318,20 +606,19 @@ async def derive_belief_only(*, cluster_items: list[dict[str, Any]]) -> str:
     draft_model = (llm_cfg.get("draft_model") or "deepseek/deepseek-chat").strip()
     payload = {"items": cluster_items}
     system = (
-        "You are extracting a concrete user belief from multiple discussion snippets.\n"
-        "Prompt: What are users collectively experiencing, doing, or struggling with?\n"
+        "Extract ONE sentence: the non-obvious belief behind the discussion.\n"
         "Rules:\n"
-        "- Focus on behavior, pain, confusion, decision-making\n"
-        "- Be concrete (what they do / avoid / ask / fear), not abstract\n"
-        "- Avoid vague phrasing like: \"navigating complex markets\", \"seeking clarity\" (without saying about what)\n"
-        "- Must be grounded in the provided text\n"
-        "- Do NOT mention company names\n"
-        "- Output MUST be exactly 1 sentence.\n"
-        "Return ONLY valid JSON: {\"belief\":\"...\"}"
+        "- Must include tension, mistake, or what users are getting WRONG (not a neutral description).\n"
+        "- Prefer: distrust of own judgment, hidden duplication, validation-seeking, fear-driven timing, confusion framed as a wrong assumption.\n"
+        "- Be concrete; no abstract filler.\n"
+        "- FORBIDDEN openings/phrases: \"users are discussing\", \"users are seeking\", \"users frequently\", \"people are\", \"there is a trend\".\n"
+        "- Do NOT mention company names.\n"
+        "- Ground in the snippets.\n"
+        "Return ONLY JSON: {\"belief\":\"...\"}"
     )
     user = json.dumps(cluster_items[:12], ensure_ascii=False)
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
-    obj = await _cached_json_call(namespace="belief:v3", payload=payload, value_key="obj", draft_model=draft_model, messages=messages)
+    obj = await _cached_json_call(namespace="belief:v6", payload=payload, value_key="obj", draft_model=draft_model, messages=messages)
     if not isinstance(obj, dict):
         return ""
     return str(obj.get("belief") or "").strip()
@@ -352,14 +639,15 @@ async def narrative_from_belief(*, belief: str, examples: list[str]) -> str:
         "  - Not: \"Investors lack confidence\".\n"
         "  - Yes: \"Investors think they're diversified but are duplicating the same exposure across funds, so they keep seeking validation before acting\".\n"
         "- Do NOT use generic consulting language.\n"
-        "- FORBIDDEN openings/phrases: \"users are discussing\", \"users discuss\", \"there is a trend\", \"highlights a broader trend\", \"navigating complexity\", \"navigating complex\", \"broader trend\".\n"
+        "- Reveal a hidden pattern or consequence (not a recap of activity).\n"
+        "- FORBIDDEN openings/phrases: \"users are discussing\", \"users frequently\", \"users discuss\", \"users are seeking\", \"people are\", \"discussion around\", \"discussion about\", \"various topics\", \"there is a trend\", \"highlights a broader trend\", \"navigating complexity\", \"navigating complex\", \"broader trend\".\n"
         "- Do NOT mention company names.\n"
         "- Avoid filler like: \"raises questions\", \"market participants\", \"increasingly\".\n"
         "Return ONLY valid JSON: {\"narrative\":\"...\"}"
     )
     user = json.dumps({"belief": belief, "examples": examples[:5]}, ensure_ascii=False)
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
-    obj = await _cached_json_call(namespace="narrative:v4", payload=payload, value_key="obj", draft_model=draft_model, messages=messages)
+    obj = await _cached_json_call(namespace="narrative:v7", payload=payload, value_key="obj", draft_model=draft_model, messages=messages)
     if not isinstance(obj, dict):
         return ""
     return str(obj.get("narrative") or "").strip()
@@ -382,33 +670,291 @@ async def why_now_llm(*, narrative: str, belief: str, vertical: str) -> str:
     )
     user = json.dumps(payload, ensure_ascii=False)
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
-    obj = await _cached_json_call(namespace="why_now:v1", payload=payload, value_key="obj", draft_model=draft_model, messages=messages)
+    obj = await _cached_json_call(namespace="why_now:v2", payload=payload, value_key="obj", draft_model=draft_model, messages=messages)
     if not isinstance(obj, dict):
         return ""
     return str(obj.get("why_now") or "").strip()
 
 
-async def title_llm(*, narrative: str, belief: str) -> str:
+async def why_it_matters_llm(*, narrative: str, belief: str) -> str:
     llm_cfg = _cfg_llm()
     draft_model = (llm_cfg.get("draft_model") or "deepseek/deepseek-chat").strip()
     payload = {"narrative": narrative, "belief": belief}
     system = (
-        "Create a short UI title for a narrative card.\n"
+        "Explain the risk or consequence of this behavior in one sharp sentence.\n"
         "Rules:\n"
-        "- 4 to 6 words\n"
-        "- Punchy, specific, headline-like (NOT a sentence)\n"
-        "- NO generic phrasing\n"
-        "- NO company names\n"
-        "- Do NOT start with: \"users\", \"people\", \"investors\", \"there\"\n"
-        "- Do NOT use verbs like: \"users are\", \"people are\", \"there is\"\n"
+        "- Name a concrete downside: false diversification, hidden exposure, churn, reactive decisions, no conviction.\n"
+        "- No questions. No advisory fluff.\n"
+        "- FORBIDDEN words/phrases: important, critical, helps, helpful, valuable insight, empowering, "
+        "informed decisions, users are, people are, discussion about, various.\n"
+        "- No company names.\n"
+        "Return ONLY JSON: {\"why_it_matters\":\"...\"}"
+    )
+    user = json.dumps(payload, ensure_ascii=False)
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    obj = await _cached_json_call(namespace="why_it_matters:v3", payload=payload, value_key="obj", draft_model=draft_model, messages=messages)
+    if not isinstance(obj, dict):
+        return ""
+    return str(obj.get("why_it_matters") or "").strip()
+
+
+async def business_impact_llm(*, narrative: str, belief: str, vertical: str) -> str:
+    """Broker-facing business consequence (one sentence, CFO-level)."""
+    llm_cfg = _cfg_llm()
+    draft_model = (llm_cfg.get("draft_model") or "deepseek/deepseek-chat").strip()
+    payload = {"narrative": narrative, "belief": belief, "vertical": vertical}
+    system = (
+        "Explain the direct business impact in terms of revenue, churn, or retention.\n"
+        "Tone: measurable, CFO-level, concrete.\n"
+        "Rules:\n"
+        "- EXACTLY 1 sentence.\n"
+        "- Must reference at least one metric concept (e.g., churn/retention/LTV/AUM/revenue/commissions/support load).\n"
+        "- Do NOT use vague words: impact, important, helps, valuable, essential, insights.\n"
+        "- No questions. No company names.\n"
+        "Return ONLY JSON: {\"business_impact\":\"...\"}"
+    )
+    user = json.dumps(payload, ensure_ascii=False)
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    obj = await _cached_json_call(namespace="business_impact:v1", payload=payload, value_key="obj", draft_model=draft_model, messages=messages)
+    if not isinstance(obj, dict):
+        return ""
+    return str(obj.get("business_impact") or "").strip()
+
+
+def is_low_quality_business_impact(text: str) -> bool:
+    t = (text or "").strip()
+    if len(t) < 24:
+        return True
+    if "?" in t:
+        return True
+    if contains_generic_language(t):
+        return True
+    if _BUSINESS_IMPACT_VAGUE_RE.search(t):
+        return True
+    if not _BUSINESS_METRIC_RE.search(t):
+        return True
+    return False
+
+
+async def rewrite_business_impact_llm(*, narrative: str, belief: str, vertical: str, bad_line: str) -> str:
+    llm_cfg = _cfg_llm()
+    draft_model = (llm_cfg.get("draft_model") or "deepseek/deepseek-chat").strip()
+    payload = {"narrative": narrative, "belief": belief, "vertical": vertical, "bad_line": bad_line}
+    system = (
+        "Rewrite the business impact into 1 CFO-level sentence.\n"
+        "Rules:\n"
+        "- Must reference revenue/churn/retention/LTV/AUM/commissions/support load.\n"
+        "- Do NOT use vague words: impact, important, helps, valuable, essential, insights.\n"
+        "- No questions. No company names.\n"
+        "Return ONLY JSON: {\"business_impact\":\"...\"}"
+    )
+    user = json.dumps(payload, ensure_ascii=False)
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    obj = await _cached_json_call(
+        namespace="business_impact_rewrite:v1",
+        payload=payload,
+        value_key="obj",
+        draft_model=draft_model,
+        messages=messages,
+    )
+    if not isinstance(obj, dict):
+        return ""
+    return str(obj.get("business_impact") or "").strip()
+
+
+async def sharpen_title_concrete_llm(*, title: str, narrative: str, belief: str) -> str:
+    """Final pass: replace abstract / slogan titles with concrete behavioral insight."""
+    llm_cfg = _cfg_llm()
+    draft_model = (llm_cfg.get("draft_model") or "deepseek/deepseek-chat").strip()
+    payload = {"title": title, "narrative": narrative, "belief": belief}
+    system = (
+        "Make this title more concrete and behavioral. Expose the mistake or wrong assumption.\n"
+        "Replace the given title entirely.\n"
+        "Rules:\n"
+        "- EXACTLY 4 to 6 words. Title Case.\n"
+        "- No slogans like 'Volatility Rewards Conviction' — name behavior or tension.\n"
+        "- FORBIDDEN: seek, identify, discuss, various, rewards (as empty praise), journey, wisdom.\n"
+        "- NO company names.\n"
         "Return ONLY JSON: {\"title\":\"...\"}"
     )
     user = json.dumps(payload, ensure_ascii=False)
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
-    obj = await _cached_json_call(namespace="title:v1", payload=payload, value_key="obj", draft_model=draft_model, messages=messages)
+    obj = await _cached_json_call(namespace="title_concrete:v1", payload=payload, value_key="obj", draft_model=draft_model, messages=messages)
     if not isinstance(obj, dict):
         return ""
     return str(obj.get("title") or "").strip()
+
+
+async def rewrite_why_it_matters_llm(*, narrative: str, belief: str, bad_line: str) -> str:
+    """Replace fluffy why_it_matters with a sharp consequence sentence."""
+    llm_cfg = _cfg_llm()
+    draft_model = (llm_cfg.get("draft_model") or "deepseek/deepseek-chat").strip()
+    payload = {"narrative": narrative, "belief": belief, "bad_line": bad_line}
+    system = (
+        "Explain the risk or consequence of this behavior in one sharp sentence.\n"
+        "Replace the bad line entirely.\n"
+        "Rules:\n"
+        "- Concrete downside only — no \"important\", \"critical\", \"helps\", marketing, or generic advisory tone.\n"
+        "- No questions. No company names.\n"
+        "Return ONLY JSON: {\"why_it_matters\":\"...\"}"
+    )
+    user = json.dumps(payload, ensure_ascii=False)
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    obj = await _cached_json_call(namespace="why_it_matters_rewrite:v1", payload=payload, value_key="obj", draft_model=draft_model, messages=messages)
+    if not isinstance(obj, dict):
+        return ""
+    return str(obj.get("why_it_matters") or "").strip()
+
+
+async def what_to_say_one_liner_llm(*, narrative: str, belief: str, founder_what_to_say: str) -> str:
+    """Single sharp line for UI — derived from founder intent, instantly usable."""
+    llm_cfg = _cfg_llm()
+    draft_model = (llm_cfg.get("draft_model") or "deepseek/deepseek-chat").strip()
+    payload = {"narrative": narrative, "belief": belief, "founder_draft": founder_what_to_say}
+    system = (
+        "Write a bold one-line statement exposing the mistake or insight. Founder voice.\n"
+        "Rules:\n"
+        "- MUST NOT be a question (no question mark).\n"
+        "- MUST NOT be polite CTA, soft ask, or marketing tone.\n"
+        "- Name the wrong assumption or hidden mechanism — provocative but credible.\n"
+        "- FORBIDDEN: need/want/get/try/contact/discover/learn more at start; "
+        "\"empowering\", \"helping users\", \"informed decisions\", \"users are\", \"people are\", \"various\", "
+        "\"discussion around\", \"discussion about\".\n"
+        "- No company names.\n"
+        "Return ONLY JSON: {\"what_to_say\":\"...\"}"
+    )
+    user = json.dumps(payload, ensure_ascii=False)
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    obj = await _cached_json_call(namespace="what_to_say_line:v4", payload=payload, value_key="obj", draft_model=draft_model, messages=messages)
+    if not isinstance(obj, dict):
+        return ""
+    return str(obj.get("what_to_say") or "").strip()
+
+
+async def rewrite_what_to_say_founder_llm(*, narrative: str, belief: str, bad_line: str) -> str:
+    """Replace weak what_to_say (question/CTA) with founder punch."""
+    llm_cfg = _cfg_llm()
+    draft_model = (llm_cfg.get("draft_model") or "deepseek/deepseek-chat").strip()
+    payload = {"narrative": narrative, "belief": belief, "bad_line": bad_line}
+    system = (
+        "Write a bold one-line statement exposing the mistake or insight. No questions.\n"
+        "Replace the bad line entirely. No polite CTA or marketing tone.\n"
+        "No company names.\n"
+        "Return ONLY JSON: {\"what_to_say\":\"...\"}"
+    )
+    user = json.dumps(payload, ensure_ascii=False)
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    obj = await _cached_json_call(namespace="what_to_say_rewrite:v1", payload=payload, value_key="obj", draft_model=draft_model, messages=messages)
+    if not isinstance(obj, dict):
+        return ""
+    return str(obj.get("what_to_say") or "").strip()
+
+
+async def title_llm(*, narrative: str, belief: str, emerging: bool = False) -> str:
+    llm_cfg = _cfg_llm()
+    draft_model = (llm_cfg.get("draft_model") or "deepseek/deepseek-chat").strip()
+    payload = {"narrative": narrative, "belief": belief, "emerging": emerging}
+    emerging_hint = ""
+    if emerging:
+        emerging_hint = (
+            "This is an EMERGING signal: title must feel like early insight (behavior forming), "
+            "e.g. \"Early Signs of Validation Dependency\" or \"Struggle with Allocation Confidence\" — "
+            "not noise, not keyword salad.\n"
+        )
+    system = (
+        "Create a sharp 4–6 word investor insight title — behavior or tension. No generic filler.\n"
+        + emerging_hint
+        + "Rules:\n"
+        "- EXACTLY 4 to 6 words. Never more than 6 words.\n"
+        "- Clear human insight — NOT keyword stacking or SEO-style stacks.\n"
+        "- Headline style; Title Case; punchy.\n"
+        "- FORBIDDEN anywhere: seek, seeking, identify, discuss, discussion, various, frequently, topics, feedback (as filler).\n"
+        "- Do NOT start with: Users, People, Investors, There, Discussion.\n"
+        "- NO company names.\n"
+        "Return ONLY JSON: {\"title\":\"...\"}"
+    )
+    user = json.dumps(payload, ensure_ascii=False)
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    obj = await _cached_json_call(namespace="title:v4", payload=payload, value_key="obj", draft_model=draft_model, messages=messages)
+    if not isinstance(obj, dict):
+        return ""
+    return str(obj.get("title") or "").strip()
+
+
+async def emerging_insight_title_llm(*, narrative: str, belief: str) -> str:
+    """
+    All emerging narratives: sharp 4–6 word insight title (behavior / tension), not noise.
+    """
+    llm_cfg = _cfg_llm()
+    draft_model = (llm_cfg.get("draft_model") or "deepseek/deepseek-chat").strip()
+    payload = {"narrative": narrative, "belief": belief}
+    system = (
+        "Convert this into a sharp 4–6 word investor insight. No generic words. "
+        "No verbs like 'seek', 'identify', or 'discuss'.\n"
+        "Rules:\n"
+        "- EXACTLY 4 to 6 words. Never more than 6.\n"
+        "- Clear human insight — behavior or tension — not keyword stacking.\n"
+        "- FORBIDDEN: seek, identify, discuss, various, frequently, users, people, discussion.\n"
+        "- Title Case; NO company names.\n"
+        "Return ONLY JSON: {\"title\":\"...\"}"
+    )
+    user = json.dumps(payload, ensure_ascii=False)
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    obj = await _cached_json_call(namespace="emerging_title:v2", payload=payload, value_key="obj", draft_model=draft_model, messages=messages)
+    if not isinstance(obj, dict):
+        return ""
+    return str(obj.get("title") or "").strip()
+
+
+async def rewrite_title_insight_llm(*, bad_title: str, narrative: str, belief: str, emerging: bool) -> str:
+    """Fallback when primary title fails quality checks."""
+    llm_cfg = _cfg_llm()
+    draft_model = (llm_cfg.get("draft_model") or "deepseek/deepseek-chat").strip()
+    payload = {"bad_title": bad_title, "narrative": narrative, "belief": belief, "emerging": emerging}
+    hint = "Emerging signal — " if emerging else ""
+    system = (
+        f"{hint}"
+        "Convert this into a sharp 4–6 word investor insight. No generic words. "
+        "No verbs like 'seek' or 'identify'. Replace the bad title completely — do not repeat its junk words.\n"
+        "Rules:\n"
+        "- EXACTLY 4 to 6 words. Never more than 6.\n"
+        "- Clear human insight — not keyword stacking.\n"
+        "- FORBIDDEN: seek, identify, discuss, various, frequently, users, people, discussion.\n"
+        "- Title Case; NO company names.\n"
+        "Return ONLY JSON: {\"title\":\"...\"}"
+    )
+    user = json.dumps(payload, ensure_ascii=False)
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    obj = await _cached_json_call(namespace="title_rewrite:v2", payload=payload, value_key="obj", draft_model=draft_model, messages=messages)
+    if not isinstance(obj, dict):
+        return ""
+    return str(obj.get("title") or "").strip()
+
+
+async def sanitize_belief_narrative_generic_llm(*, belief: str, narrative: str) -> dict[str, str]:
+    """Remove forbidden generic phrasing; keep one sentence each."""
+    llm_cfg = _cfg_llm()
+    draft_model = (llm_cfg.get("draft_model") or "deepseek/deepseek-chat").strip()
+    payload = {"belief": belief, "narrative": narrative}
+    system = (
+        "Rewrite belief and narrative to remove generic filler.\n"
+        "FORBIDDEN phrases: \"users are\", \"people are\", \"discussion about\", \"various\", \"empowering users\", \"helping users\".\n"
+        "Replace with direct behavioral statements and tension-driven insight.\n"
+        "Rules:\n"
+        "- belief: ONE sentence, concrete tension or mistake.\n"
+        "- narrative: ONE sentence, behavior + implication.\n"
+        "- No company names.\n"
+        "Return ONLY JSON: {\"belief\":\"...\",\"narrative\":\"...\"}"
+    )
+    user = json.dumps(payload, ensure_ascii=False)
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    obj = await _cached_json_call(namespace="sanitize_generic:v1", payload=payload, value_key="obj", draft_model=draft_model, messages=messages)
+    if not isinstance(obj, dict):
+        return {"belief": belief, "narrative": narrative}
+    return {
+        "belief": str(obj.get("belief") or "").strip() or belief,
+        "narrative": str(obj.get("narrative") or "").strip() or narrative,
+    }
 
 
 async def broker_relevance_gate(*, belief: str, narrative: str) -> dict[str, Any]:
@@ -509,21 +1055,22 @@ async def founder_mode_llm(*, narrative: str, belief: str) -> dict[str, Any]:
     draft_model = (llm_cfg.get("draft_model") or "deepseek/deepseek-chat").strip()
     payload = {"narrative": narrative, "belief": belief}
     system = (
-        "You write Founder-mode comms: sharp, opinionated, and immediately usable.\n"
-        "Tone: confident, specific, human (not corporate).\n"
+        "You write Founder-mode comms: sharp, opinionated, slightly contrarian.\n"
+        "Tone: real founder POV — punch through the pain, not a brochure.\n"
         "Rules:\n"
-        "- what_to_say must directly address the user's confusion/pain and name the tension\n"
-        "- what_to_say must include one concrete framing or rule-of-thumb (no generic 'stay informed')\n"
-        "- NO product/UX suggestions\n"
-        "- Do not propose tools, features, or recommendations\n"
-        "- No company names\n"
-        "- Avoid corporate words: empower, enable, unlock, seamless, leverage\n"
+        "- what_to_say: 1-2 lines that NAME the mistake or tension + a concrete reframe.\n"
+        "- MUST NOT be only a question; prefer declarative punches. No question marks in what_to_say.\n"
+        "- Hit pain directly; no corporate tone.\n"
+        "- example_post: conversational Twitter/LinkedIn voice; no jargon.\n"
+        "- NO product/UX/feature suggestions.\n"
+        "- No company names.\n"
+        "- FORBIDDEN: empower, enabling, seamless, leverage, \"helping users\", \"informed decisions\", \"users are seeking\".\n"
         "Return ONLY JSON:\n"
         '{ "what_to_say": "1-2 lines", "channels": ["twitter","linkedin","community"], "example_post": "short natural post" }'
     )
     user = json.dumps(payload, ensure_ascii=False)
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
-    obj = await _cached_json_call(namespace="founder_mode:v2", payload=payload, value_key="obj", draft_model=draft_model, messages=messages)
+    obj = await _cached_json_call(namespace="founder_mode:v5", payload=payload, value_key="obj", draft_model=draft_model, messages=messages)
     if not isinstance(obj, dict):
         return {"what_to_say": "", "channels": [], "example_post": ""}
     channels = obj.get("channels") if isinstance(obj.get("channels"), list) else []
@@ -539,21 +1086,20 @@ async def pr_mode_llm(*, narrative: str, belief: str) -> dict[str, Any]:
     draft_model = (llm_cfg.get("draft_model") or "deepseek/deepseek-chat").strip()
     payload = {"narrative": narrative, "belief": belief}
     system = (
-        "You create PR-mode narrative ownership guidance.\n"
+        "You create PR-mode narrative ownership: clear stance vs the market.\n"
         "Rules:\n"
-        "- Strategic but natural tone; no fluff\n"
-        "- core_message must be the narrative the company wants to OWN (not a summary)\n"
-        "- angle must differentiate (what we say that others aren't saying)\n"
-        "- NO product/UX suggestions\n"
-        "- Do not propose tools, features, or recommendations\n"
-        "- No company names\n"
-        "- Avoid vague PR filler: \"commitment\", \"leading platform\", \"customer-first\" unless tied to the belief\n"
+        "- core_message: a sharp claim to OWN (not a summary). Take a position.\n"
+        "- angle: how this differs from generic fintech/PR noise (competitors stay vague; we name the mechanism).\n"
+        "- content_examples: usable lines; sound human, not press-release.\n"
+        "- NO product/UX suggestions.\n"
+        "- No company names.\n"
+        "- FORBIDDEN phrases: \"empowering users\", \"helping users\", \"informed decisions\", \"commitment to\", \"leading platform\".\n"
         "Return ONLY JSON:\n"
         '{ "core_message": "...", "angle": "...", "content_examples": { "news_article": "...", "social_post": "...", "forum_response": "..." } }'
     )
     user = json.dumps(payload, ensure_ascii=False)
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
-    obj = await _cached_json_call(namespace="pr_mode:v2", payload=payload, value_key="obj", draft_model=draft_model, messages=messages)
+    obj = await _cached_json_call(namespace="pr_mode:v3", payload=payload, value_key="obj", draft_model=draft_model, messages=messages)
     if not isinstance(obj, dict):
         return {"core_message": "", "angle": "", "content_examples": {}}
     ce = obj.get("content_examples") if isinstance(obj.get("content_examples"), dict) else {}
@@ -574,16 +1120,14 @@ async def relevance_reason_llm(*, narrative: str, vertical: str) -> str:
     draft_model = (llm_cfg.get("draft_model") or "deepseek/deepseek-chat").strip()
     payload = {"narrative": narrative, "vertical": vertical}
     system = (
-        "Write a short relevance_reason for a narrative positioning engine.\n"
-        "Rules:\n"
-        "- Explain why this matters for the given vertical's communication/positioning\n"
-        "- NO product/feature/UX/tool suggestions\n"
-        "- Do not mention recommendations, personalization, dashboards, or in-app changes\n"
+        "Write a short relevance_reason: why communicators should care (positioning stakes).\n"
+        "- NO product/feature/UX/tool suggestions.\n"
+        "- FORBIDDEN: \"empowering\", \"helping users\", \"informed decisions\".\n"
         "Return ONLY JSON: {\"relevance_reason\":\"...\"}"
     )
     user = json.dumps(payload, ensure_ascii=False)
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
-    obj = await _cached_json_call(namespace="relevance_reason:v1", payload=payload, value_key="obj", draft_model=draft_model, messages=messages)
+    obj = await _cached_json_call(namespace="relevance_reason:v2", payload=payload, value_key="obj", draft_model=draft_model, messages=messages)
     if not isinstance(obj, dict):
         return ""
     return str(obj.get("relevance_reason") or "").strip()
@@ -726,5 +1270,254 @@ async def recommend_actions_llm(
         "positioning": str(obj.get("positioning") or "").strip(),
         "action": str(obj.get("action") or "").strip(),
         "content_direction": str(obj.get("content_direction") or "").strip(),
+    }
+
+
+# ============================
+# Narrative tag classification
+# ============================
+
+
+def _compact_tag_defs(tags: dict[str, Any], *, max_examples: int = 2) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for tid, meta in (tags or {}).items():
+        if not isinstance(tid, str) or not tid.strip():
+            continue
+        m = meta if isinstance(meta, dict) else {}
+        ex = m.get("examples") if isinstance(m.get("examples"), list) else []
+        out.append(
+            {
+                "id": tid.strip(),
+                "definition": str(m.get("definition") or "").strip(),
+                "include_when": [str(x) for x in (m.get("include_when") or []) if isinstance(x, str)][:6],
+                "exclude_when": [str(x) for x in (m.get("exclude_when") or []) if isinstance(x, str)][:6],
+                "examples": [str(x) for x in ex if isinstance(x, str)][:max_examples],
+                "parents": [str(x) for x in (m.get("parents") or []) if isinstance(x, str)][:6],
+            }
+        )
+    out.sort(key=lambda x: x["id"])
+    return out
+
+
+def _dedup_keep_order(xs: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for x in xs:
+        s = str(x or "").strip()
+        if not s or s in seen:
+            continue
+        out.append(s)
+        seen.add(s)
+    return out
+
+
+def _get_all_parents(tag: str, parent_map: dict[str, list[str]]) -> set[str]:
+    """
+    Return transitive closure of parents for tag. Assumes parent_map already validated (acyclic, known parents).
+    """
+    start = (tag or "").strip()
+    if not start:
+        return set()
+    out: set[str] = set()
+    stack = list(parent_map.get(start, []))
+    while stack:
+        p = stack.pop()
+        if p in out:
+            continue
+        out.add(p)
+        stack.extend(parent_map.get(p, []))
+    return out
+
+
+def _resolve_overlap(tags: list[str], parent_map: dict[str, list[str]]) -> list[str]:
+    """
+    Remove any selected tag that is a (transitive) parent of another selected tag.
+    Keeps the most specific tags only.
+    """
+    picked = _dedup_keep_order(tags)
+    parent_sets: dict[str, set[str]] = {t: _get_all_parents(t, parent_map) for t in picked}
+    to_drop: set[str] = set()
+    for a in picked:
+        for b in picked:
+            if a == b:
+                continue
+            # drop a if it is a parent of b
+            if a in parent_sets.get(b, set()):
+                to_drop.add(a)
+    return [t for t in picked if t not in to_drop]
+
+
+async def validate_domain_tag_fit(*, vertical: str, domain_tag: dict[str, Any], narrative: str, belief: str) -> float:
+    """
+    Returns score 0..1: does this narrative strongly belong to this domain tag?
+    """
+    llm_cfg = _cfg_llm()
+    draft_model = (llm_cfg.get("draft_model") or "deepseek/deepseek-chat").strip()
+    payload = {
+        "vertical": str(vertical or "").strip().lower(),
+        "domain_tag": domain_tag,
+        "narrative": narrative,
+        "belief": belief,
+    }
+    system = (
+        "You are validating DOMAIN tag precision for a narrative decision engine.\n"
+        "Return ONLY valid JSON: {\"score\": <number between 0 and 1>}.\n"
+        "Score meaning:\n"
+        "- 0.0 = clearly does NOT belong\n"
+        "- 1.0 = clearly belongs\n"
+        "Do not guess. If unclear, score <= 0.5.\n"
+    )
+    user = json.dumps(
+        {
+            "vertical": payload["vertical"],
+            "domain_tag": domain_tag,
+            "narrative": (narrative or "")[:600],
+            "belief": (belief or "")[:400],
+        },
+        ensure_ascii=False,
+    )
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    obj = await _cached_json_call(
+        namespace="narrative_domain_fit:v1",
+        payload=payload,
+        value_key="obj",
+        draft_model=draft_model,
+        messages=messages,
+    )
+    try:
+        score = float(obj.get("score")) if isinstance(obj, dict) else 0.0
+    except Exception:
+        score = 0.0
+    return max(0.0, min(1.0, score))
+
+
+async def classify_narrative_tags(
+    *,
+    vertical: str,
+    narrative: str,
+    belief: str,
+    evidence: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """
+    Config-driven dual-layer tagging:
+    - behavior_tag (mandatory, single)
+    - domain_tags (0-2), proposed by LLM then validated per-tag (>=0.6)
+    - overlap resolution via domain_tag.parents (drop broader parents)
+    """
+    from app.core.narrative_tags_config import get_narrative_tags_config
+
+    cfg = get_narrative_tags_config()
+    v = (vertical or "").strip().lower() or "broker"
+    behavior_cfg = cfg.behavior_tags(v)
+    domain_cfg = cfg.domain_tags(v)
+    valid_behavior = set(behavior_cfg.keys())
+    valid_domain = set(domain_cfg.keys())
+    fallback_behavior = "unclassified_behavior"
+
+    llm_cfg = _cfg_llm()
+    draft_model = (llm_cfg.get("draft_model") or "deepseek/deepseek-chat").strip()
+
+    compact_behavior = _compact_tag_defs(behavior_cfg, max_examples=2)
+    compact_domain = _compact_tag_defs(domain_cfg, max_examples=1)
+
+    payload = {
+        "vertical": v,
+        "narrative": (narrative or "")[:800],
+        "belief": (belief or "")[:600],
+        "evidence_urls": [str(e.get("url") or "") for e in (evidence or [])[:6] if isinstance(e, dict) and e.get("url")],
+    }
+
+    system = (
+        "You are tagging a narrative for a Narrative Decision Engine.\n"
+        "You MUST choose tags only from the provided definitions.\n"
+        "Return ONLY valid JSON.\n"
+        "Rules:\n"
+        "- Select EXACTLY 1 behavior_tag.\n"
+        "- Propose 0–2 domain_tags (optional). If unclear, return [].\n"
+        "- Do NOT invent new tags. Do NOT return free-text categories.\n"
+        "- Behavior must reflect user psychology/action.\n"
+        "- Domain must reflect product/system area; do NOT guess.\n"
+    )
+    user = json.dumps(
+        {
+            "vertical": v,
+            "behavior_tag_definitions": compact_behavior,
+            "domain_tag_definitions": compact_domain,
+            "narrative": (narrative or "").strip(),
+            "belief": (belief or "").strip(),
+            "evidence": [{"title": str(e.get("title") or "")[:180], "snippet": str(e.get("snippet") or "")[:220]} for e in (evidence or [])[:4] if isinstance(e, dict)],
+            "output_schema": {"behavior_tag": "<one id>", "domain_tags": ["<id>", "<id>"]},
+        },
+        ensure_ascii=False,
+    )
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+    obj = await _cached_json_call(
+        namespace="narrative_tags:v1",
+        payload=payload,
+        value_key="obj",
+        draft_model=draft_model,
+        messages=messages,
+    )
+
+    proposed_behavior = ""
+    proposed_domains: list[str] = []
+    if isinstance(obj, dict):
+        proposed_behavior = str(obj.get("behavior_tag") or "").strip()
+        dom = obj.get("domain_tags")
+        if isinstance(dom, list):
+            proposed_domains = [str(x or "").strip() for x in dom if str(x or "").strip()]
+    proposed_domains = proposed_domains[:2]
+
+    rejected: list[str] = []
+
+    # Normalize behavior
+    behavior_tag = proposed_behavior if proposed_behavior in valid_behavior else ""
+    if not behavior_tag:
+        if proposed_behavior:
+            rejected.append(f"invalid_behavior:{proposed_behavior}")
+        behavior_tag = fallback_behavior
+
+    # Validate domains per-tag
+    scored: list[tuple[float, str]] = []
+    for d in proposed_domains:
+        if d not in valid_domain:
+            rejected.append(f"invalid_domain:{d}")
+            continue
+        score = await validate_domain_tag_fit(
+            vertical=v,
+            domain_tag={"id": d, **(domain_cfg.get(d) if isinstance(domain_cfg.get(d), dict) else {})},
+            narrative=narrative,
+            belief=belief,
+        )
+        if score >= 0.6:
+            scored.append((score, d))
+        else:
+            rejected.append(f"domain_below_0_6:{d}:{score:.2f}")
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    kept = [d for _, d in scored][:2]
+
+    # Overlap resolution using parents graph
+    parent_map = {k: list((domain_cfg.get(k) or {}).get("parents") or []) for k in domain_cfg.keys() if isinstance(domain_cfg.get(k), dict)}
+    kept2 = _resolve_overlap(kept, parent_map)
+    if kept2 != kept:
+        dropped = [x for x in kept if x not in kept2]
+        rejected.extend([f"dropped_parent_overlap:{x}" for x in dropped])
+    kept2 = kept2[:2]
+
+    confidence_scores = {
+        "domain": {d: float(s) for s, d in scored},
+    }
+
+    return {
+        "behavior_tag": behavior_tag,
+        "domain_tags": kept2,
+        "debug": {
+            "behavior_tag_selected": behavior_tag,
+            "domain_tags_selected": kept2,
+            "rejected_tags": rejected,
+            "confidence_scores": confidence_scores,
+        },
     }
 

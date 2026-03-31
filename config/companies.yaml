@@ -1,0 +1,25 @@
+companies:
+  - name: Sahi
+    slug: sahi
+  - name: Zerodha
+    slug: zerodha
+  - name: Upstox
+    slug: upstox
+  - name: Groww
+    slug: groww
+  - name: Angel One
+    slug: angel_one
+  - name: Dhan
+    slug: dhan
+  - name: Fyers
+    slug: fyers
+  - name: Alice Blue
+    slug: alice_blue
+  - name: 5paisa
+    slug: 5paisa
+  - name: Kotak Securities
+    slug: kotak_securities
+  - name: ICICI Direct
+    slug: icici_direct
+  - name: HDFC Securities
+    slug: hdfc_securities

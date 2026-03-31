@@ -1,4 +1,5 @@
 """MongoDB connection and conversation/message storage."""
+import asyncio
 from datetime import datetime
 from typing import Optional
 
@@ -11,29 +12,57 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 _client: Optional[AsyncIOMotorClient] = None
+_clients_by_loop: dict[int, AsyncIOMotorClient] = {}
+
+
+def _loop_key() -> int:
+    """
+    Motor clients are effectively bound to an event loop.
+    This app runs async code from multiple loops (e.g., APScheduler jobs using asyncio.run()).
+    Key clients by running-loop id to avoid 'Future attached to a different loop' errors.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+        return id(loop)
+    except RuntimeError:
+        # No running loop (sync context). Use a sentinel key.
+        return 0
 
 
 def reset_mongo_client() -> None:
     """Clear the cached Motor client. Use before asyncio.run() in scripts so the new loop gets a fresh client."""
-    global _client
+    global _client, _clients_by_loop
     _client = None
+    _clients_by_loop = {}
 
 
 async def get_mongo_client() -> AsyncIOMotorClient:
-    global _client
-    if _client is None:
-        config = get_config()
-        url = config["settings"].mongodb_url
-        db_name = config["mongodb"].get("database", "chat")
-        _client = AsyncIOMotorClient(url)
-        logger.info("MongoDB connected", database=db_name)
-    return _client
+    global _client, _clients_by_loop
+    k = _loop_key()
+    if k and k in _clients_by_loop:
+        return _clients_by_loop[k]
+    # Backward compat: keep _client for legacy sync reads
+    config = get_config()
+    url = config["settings"].mongodb_url
+    db_name = config["mongodb"].get("database", "chat")
+    c = AsyncIOMotorClient(url)
+    if k:
+        _clients_by_loop[k] = c
+    _client = c
+    logger.info("MongoDB connected", database=db_name)
+    return c
 
 
 def get_db():
     """Get database - call from async context after get_mongo_client."""
     config = get_config()
-    return _client[config["mongodb"].get("database", "chat")]
+    # Prefer loop-scoped client when in async context.
+    k = _loop_key()
+    c = _clients_by_loop.get(k) if k else _client
+    if c is None:
+        # Caller violated contract (didn't await get_mongo_client first).
+        raise RuntimeError("Mongo client not initialized; call await get_mongo_client() first")
+    return c[config["mongodb"].get("database", "chat")]
 
 
 def conversations_collection():

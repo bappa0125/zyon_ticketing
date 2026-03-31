@@ -3,6 +3,7 @@ from typing import Any
 
 from fastapi import APIRouter
 
+from app.core.companies_config import get_company_by_name
 from app.core.client_config_loader import (
     get_client_profile,
     get_competitor_names,
@@ -23,10 +24,20 @@ async def get_clients():
     clients = []
     for c in raw:
         name = (c.get("name") or "").strip()
+        comp = get_company_by_name(name)
+        slug = comp.slug if comp else ""
+        if comp:
+            name = comp.name
+        competitor_rows = []
+        for n in get_competitor_names(c):
+            cc = get_company_by_name(n)
+            competitor_rows.append({"name": cc.name if cc else str(n), "slug": cc.slug if cc else ""})
+
         row: dict[str, Any] = {
             "name": name,
+            "slug": slug,
             "domain": (c.get("domain") or "").strip(),
-            "competitors": get_competitor_names(c),
+            "competitors": competitor_rows,
         }
         profile = get_client_profile(c)
         row["vertical"] = profile["vertical"]
